@@ -201,6 +201,17 @@ impl<'a> Parser<'a> {
 						path.push_str(next_path.as_ref());
 					}
 
+					while self.accept(Token::Symbol(Symbol::Dot)).is_some() {
+						let next_path_token = self.expect_any(Token::Identifier("".to_string()));
+						let next_path = match next_path_token {
+							Token::Identifier(id) => id,
+							_ => panic!() // Should never happen
+						};
+
+						path.push_str(".");
+						path.push_str(next_path.as_ref());
+					}
+
 					if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
 						BlockStatement::FuncCall(self.parse_func_call(path))
 					} else if self.accept(Token::Symbol(Symbol::Equal)).is_some() {
@@ -275,7 +286,7 @@ impl<'a> Parser<'a> {
 		)
 	}
 
-	fn parse_var_decl<'b>(&mut self) -> Box<VarDeclData> {
+	fn parse_var_decl(&mut self) -> Box<VarDeclData> {
 		let name_token = self.expect_any(Token::Identifier("".to_string()));
 		let name = match name_token {
 			Token::Identifier(i) => i,
@@ -350,16 +361,39 @@ impl<'a> Parser<'a> {
 				_ => panic!() // Should never happen
 			}
 		} else if let Some(identifier) = self.accept_any(Token::Identifier("".to_string())) {
-			match identifier {
-				Token::Identifier(i) => {
-					Expression::Variable(
-						Box::new(
-							VariableData { name: i }
-						)
-					)
-				},
+			let id = match identifier {
+				Token::Identifier(i) => i,
 				_ => panic!() // Should never happen
+			};
+
+			let mut path = id;
+			while self.accept(Token::Symbol(Symbol::ColonColon)).is_some() {
+				let next_path_token = self.expect_any(Token::Identifier("".to_string()));
+				let next_path = match next_path_token {
+					Token::Identifier(id) => id,
+					_ => panic!() // Should never happen
+				};
+
+				path.push_str("::");
+				path.push_str(next_path.as_ref());
 			}
+
+			while self.accept(Token::Symbol(Symbol::Dot)).is_some() {
+				let next_path_token = self.expect_any(Token::Identifier("".to_string()));
+				let next_path = match next_path_token {
+					Token::Identifier(id) => id,
+					_ => panic!() // Should never happen
+				};
+
+				path.push_str(".");
+				path.push_str(next_path.as_ref());
+			}
+
+			Expression::Variable(
+				Box::new(
+					VariableData { name: path }
+				)
+			)
 		} else {
 			panic!("Parser error: unexpected token {:?}, ast: {:#?}", self.current_token, self.ast)
 		};

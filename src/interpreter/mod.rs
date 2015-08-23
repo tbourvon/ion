@@ -177,7 +177,21 @@ impl<'a> Interpreter<'a> {
 
 	fn execute_var_assignment(&self, vars: &mut InterpreterVars, var_assignment_data: &VarAssignmentData) {
 		let value = self.value_from_expression(vars, &var_assignment_data.value);
-		vars.get_mut(AsRef::<str>::as_ref(&var_assignment_data.name[..])).unwrap().value = value;
+
+		let mut path = var_assignment_data.name.split(".");
+
+		let mut current_ref = &mut vars.get_mut(AsRef::<str>::as_ref(path.next().unwrap())).unwrap().value;
+
+		for id in path {
+			let current_map = match *{current_ref} {
+				Value::Struct(ref mut map) => map,
+				_ => panic!("Interpreter error: cannot access field on non-struct")
+			};
+
+			current_ref = current_map.get_mut(id).unwrap();
+		};
+
+		*current_ref = value;
 	}
 
 	fn execute_if(&self, vars: &mut InterpreterVars, if_data: &'a IfData) {
@@ -215,7 +229,22 @@ impl<'a> Interpreter<'a> {
 			Expression::StringLiteral(ref sl) => Value::String(sl.value.clone()),
 			Expression::IntegerLiteral(ref il) => Value::Integer(il.value),
 			Expression::BoolLiteral(ref bl) => Value::Bool(bl.value),
-			Expression::Variable(ref v) => vars.get(Borrow::<str>::borrow(&v.name)).unwrap().value.clone(),
+			Expression::Variable(ref v) => {
+				let mut path = v.name.split(".");
+
+				let mut current_ref = &vars.get(path.next().unwrap()).unwrap().value;
+
+				for id in path {
+					let current_map = match *{current_ref} {
+						Value::Struct(ref map) => map,
+						_ => panic!("Interpreter error: cannot access field on non-struct")
+					};
+
+					current_ref = current_map.get(id).unwrap();
+				};
+
+				current_ref.clone()
+			},
 			Expression::Addition(ref e1, ref e2) => {
 				let integer1 = match self.value_from_expression(vars, e1) {
 					Value::Integer(i) => i,
