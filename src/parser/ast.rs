@@ -1,0 +1,138 @@
+use std;
+
+#[derive(Debug, Clone)]
+pub struct Ast {
+	pub statements: std::vec::Vec<Statement>,
+}
+
+impl Ast {
+	pub fn new() -> Self {
+		Ast {
+			statements: vec![],
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub enum Statement {
+	Import(Box<ImportData>),
+	Package(Box<PackageData>),
+	FuncDecl(Box<FuncDeclData>),
+	StructDecl(Box<StructDeclData>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportData {
+	pub path: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PackageData {
+	pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FuncDeclData {
+	pub name: String,
+	pub return_type: Option<Type>,
+	pub parameters: std::vec::Vec<Box<FuncDeclParamData>>,
+	pub statements: std::vec::Vec<BlockStatement>,
+}
+
+#[derive(Debug, Clone)]
+pub enum BlockStatement {
+	FuncCall(Box<FuncCallData>),
+	VarDecl(Box<VarDeclData>),
+	VarAssignment(Box<VarAssignmentData>),
+	If(Box<IfData>),
+	While(Box<WhileData>),
+}
+
+#[derive(Debug, Clone)]
+pub struct IfData {
+	pub condition: Expression,
+	pub statements: std::vec::Vec<BlockStatement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WhileData {
+	pub condition: Expression,
+	pub statements: std::vec::Vec<BlockStatement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct VarAssignmentData {
+	pub name: String,
+	pub value: Expression,
+}
+
+#[derive(Debug, Clone)]
+pub struct FuncCallData {
+	pub name: String,
+	pub arguments: std::vec::Vec<Box<FuncCallArgData>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct VarDeclData {
+	pub name: String,
+	pub var_type: Type,
+	pub value: Option<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FuncCallArgData {
+	pub value: Expression,
+}
+
+#[derive(Debug, Clone)]
+pub struct FuncDeclParamData {
+	pub name: String,
+	pub param_type: Type,
+	pub default_value: Option<Expression>,
+}
+
+pub type Type = String;
+
+#[derive(Debug, Clone)]
+pub struct StructDeclData {
+	pub name: String,
+	pub fields: std::vec::Vec<Box<StructFieldData>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructFieldData {
+	pub name: String,
+	pub field_type: Type,
+	pub default_value: Option<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Expression {
+	StringLiteral(Box<StringLiteralData>),
+	IntegerLiteral(Box<IntegerLiteralData>),
+	BoolLiteral(Box<BoolLiteralData>),
+	Variable(Box<VariableData>),
+	Addition(Box<Expression>, Box<Expression>),
+	Equality(Box<Expression>, Box<Expression>),
+	Inequality(Box<Expression>, Box<Expression>),
+}
+
+#[derive(Debug, Clone)]
+pub struct VariableData {
+	pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StringLiteralData {
+	pub value: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct IntegerLiteralData {
+	pub value: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct BoolLiteralData {
+	pub value: bool,
+}

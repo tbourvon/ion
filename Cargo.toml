@@ -1,0 +1,7 @@
+[package]
+name = "ion"
+version = "0.0.1"
+authors = ["Tristan Bourvon <tristanbourvon+ion@gmail.com>"]
+
+[dependencies]
+docopt = "*"
