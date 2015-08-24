@@ -1,5 +1,4 @@
 use parser::ast::*;
-use std::borrow::Borrow;
 use std;
 use lexer;
 use parser;
@@ -108,17 +107,22 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn execute_block_statement(&self, vars: &mut InterpreterVars, block_statement: &'a BlockStatement) {
+	fn execute_block_statement(&self, vars: &mut InterpreterVars, block_statement: &'a BlockStatement) -> Option<Value> {
 		match *block_statement {
-			BlockStatement::FuncCall(ref fc) => self.execute_func_call(vars, fc),
-			BlockStatement::VarDecl(ref vd) => self.execute_var_decl(vars, vd),
-			BlockStatement::VarAssignment(ref va) => self.execute_var_assignment(vars, va),
-			BlockStatement::If(ref i) => self.execute_if(vars, i),
-			BlockStatement::While(ref w) => self.execute_while(vars, w),
+			BlockStatement::FuncCall(ref fc) => { self.execute_func_call(vars, fc); None },
+			BlockStatement::VarDecl(ref vd) => { self.execute_var_decl(vars, vd); None },
+			BlockStatement::VarAssignment(ref va) => { self.execute_var_assignment(vars, va); None },
+			BlockStatement::If(ref i) => { self.execute_if(vars, i); None },
+			BlockStatement::While(ref w) => { self.execute_while(vars, w); None },
+			BlockStatement::Return(ref r) => self.execute_return(vars, r),
 		}
 	}
 
-	fn execute_func_call(&self, vars: &mut InterpreterVars, func_call_data: &FuncCallData) {
+	fn execute_return(&self, vars: &mut InterpreterVars, return_data: &ReturnData) -> Option<Value> {
+		Some(self.value_from_expression(vars, &return_data.value))
+	}
+
+	fn execute_func_call(&self, vars: &mut InterpreterVars, func_call_data: &FuncCallData) -> Option<Value> {
 		match func_call_data.name.as_ref() {
 			"println" => self.builtin_println(vars, func_call_data),
 			n => {
@@ -148,13 +152,22 @@ impl<'a> Interpreter<'a> {
 					param_count += 1;
 				}
 
+				let mut return_value: Option<Value> = None;
 				for statement in &self.funcs.get(n).unwrap().statements {
-					self.execute_block_statement(vars, statement);
+					match self.execute_block_statement(vars, statement) {
+						Some(v) => {
+							return_value = Some(v);
+							break
+						},
+						None => ()
+					}
 				}
 
 				for param in &self.funcs.get(n).unwrap().parameters {
 					vars.remove(AsRef::<str>::as_ref(&param.name[..]));
 				}
+
+				return_value
 			}
 		}
 	}
@@ -245,6 +258,9 @@ impl<'a> Interpreter<'a> {
 
 				current_ref.clone()
 			},
+			Expression::FuncCall(ref fc) => {
+				self.execute_func_call(vars, fc).unwrap()
+			},
 			Expression::Addition(ref e1, ref e2) => {
 				let integer1 = match self.value_from_expression(vars, e1) {
 					Value::Integer(i) => i,
@@ -273,10 +289,10 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn builtin_println(&self, vars: &mut InterpreterVars, func_call_data: &FuncCallData) {
+	fn builtin_println(&self, vars: &mut InterpreterVars, func_call_data: &FuncCallData) -> Option<Value> {
 		if func_call_data.arguments.len() != 1 {
 			panic!("Interpreter error: invalid argument count for println")
-		}
+		};
 
 		match self.value_from_expression(vars, &func_call_data.arguments[0].value) {
 			Value::String(s) => println!("{}", s),
@@ -284,7 +300,9 @@ impl<'a> Interpreter<'a> {
 			Value::Bool(b) => println!("{}", b),
 			Value::Struct(s) => println!("{:?}", s),
 			/*other => panic!("Interpreter error: invalid argument type for println (got {:?})", other)*/
-		}
+		};
+
+		None
 	}
 
 	fn default_value(&self, var_type: Type) -> Value {

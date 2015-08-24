@@ -46,6 +46,12 @@ pub enum BlockStatement {
 	VarAssignment(Box<VarAssignmentData>),
 	If(Box<IfData>),
 	While(Box<WhileData>),
+	Return(Box<ReturnData>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ReturnData {
+	pub value: Expression,
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +118,7 @@ pub enum Expression {
 	IntegerLiteral(Box<IntegerLiteralData>),
 	BoolLiteral(Box<BoolLiteralData>),
 	Variable(Box<VariableData>),
+	FuncCall(Box<FuncCallData>),
 	Addition(Box<Expression>, Box<Expression>),
 	Equality(Box<Expression>, Box<Expression>),
 	Inequality(Box<Expression>, Box<Expression>),

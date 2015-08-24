@@ -186,6 +186,8 @@ impl<'a> Parser<'a> {
 			BlockStatement::If(self.parse_if())
 		} else if self.accept(Token::Keyword(Keyword::While)).is_some() {
 			BlockStatement::While(self.parse_while())
+		} else if self.accept(Token::Keyword(Keyword::Return)).is_some() {
+			BlockStatement::Return(self.parse_return())
 		} else if let Some(identifier) = self.accept_any(Token::Identifier("".to_string())) {
 			match identifier {
 				Token::Identifier(i) => {
@@ -225,6 +227,12 @@ impl<'a> Parser<'a> {
 		} else {
 			panic!("Parser error: unexpected token {:?}", self.current_token)
 		}
+	}
+
+	fn parse_return(&mut self) -> Box<ReturnData> {
+		Box::new(
+			ReturnData { value: self.parse_expression() }
+		)
 	}
 
 	fn parse_if(&mut self) -> Box<IfData> {
@@ -389,11 +397,15 @@ impl<'a> Parser<'a> {
 				path.push_str(next_path.as_ref());
 			}
 
-			Expression::Variable(
-				Box::new(
-					VariableData { name: path }
+			if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
+				Expression::FuncCall(self.parse_func_call(path))
+			} else {
+				Expression::Variable(
+					Box::new(
+						VariableData { name: path }
+					)
 				)
-			)
+			}
 		} else {
 			panic!("Parser error: unexpected token {:?}, ast: {:#?}", self.current_token, self.ast)
 		};
