@@ -89,11 +89,7 @@ impl<'a> Parser<'a> {
 
 			self.expect(Token::Symbol(Symbol::Colon));
 
-			let arg_type_token = self.expect_any(Token::Identifier("".to_string()));
-			let arg_type = match arg_type_token {
-				Token::Identifier(s) => s,
-				_ => panic!(), // Should never happen
-			};
+			let arg_type = self.parse_type();
 
 			params.push(
 				Box::new(
@@ -148,11 +144,7 @@ impl<'a> Parser<'a> {
 
 			self.expect(Token::Symbol(Symbol::Colon));
 
-			let field_type_token = self.expect_any(Token::Identifier("".to_string()));
-			let field_type = match field_type_token {
-				Token::Identifier(s) => s,
-				_ => panic!(), // Should never happen
-			};
+			let field_type = self.parse_type();
 
 			fields.push(
 				Box::new(
@@ -216,10 +208,30 @@ impl<'a> Parser<'a> {
 
 					if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
 						BlockStatement::FuncCall(self.parse_func_call(path))
-					} else if self.accept(Token::Symbol(Symbol::Equal)).is_some() {
-						BlockStatement::VarAssignment(self.parse_var_assignment(path))
 					} else {
-						panic!("Parser error: unexpected token {:?}", self.current_token)
+						while self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
+							path.push_str("[");
+
+							let index_token = self.accept_any(Token::IntegerLiteral(0));
+							match index_token {
+								Some(t) => {
+									match t {
+										Token::IntegerLiteral(i) => path.push_str(i.to_string().as_ref()),
+										_ => panic!() // Should never happen
+									}
+								},
+								None => (),
+							};
+
+							self.expect(Token::Symbol(Symbol::RightBracket));
+							path.push_str("]");
+						}
+
+						if self.accept(Token::Symbol(Symbol::Equal)).is_some() {
+							BlockStatement::VarAssignment(self.parse_var_assignment(path))
+						} else {
+							panic!("Parser error: unexpected token {:?}", self.current_token)
+						}
 					}
 				},
 				_ => panic!(), // Should never happen
@@ -303,11 +315,7 @@ impl<'a> Parser<'a> {
 
 		self.expect(Token::Symbol(Symbol::Colon));
 
-		let type_token = self.expect_any(Token::Identifier("".to_string()));
-		let var_type = match type_token {
-			Token::Identifier(i) => i,
-			_ => panic!(), // Should never happen
-		};
+		let var_type = self.parse_type();
 
 		let value = if self.accept(Token::Symbol(Symbol::Equal)).is_some() {
 			Some(self.parse_expression())
@@ -335,7 +343,23 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_expression(&mut self) -> Expression {
-		let expr = if let Some(string_literal) = self.accept_any(Token::StringLiteral("".to_string())) {
+		let expr = if self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
+			let mut items: std::vec::Vec<Expression> = vec![];
+			while self.accept(Token::Symbol(Symbol::RightBracket)).is_none() {
+				items.push(self.parse_expression());
+				if self.current_token == Token::Symbol(Symbol::RightBracket) {
+					self.accept(Token::Symbol(Symbol::Comma));
+				} else {
+					self.expect(Token::Symbol(Symbol::Comma));
+				};
+			};
+
+			Expression::Array(
+				Box::new(
+					ArrayData { items: items }
+				)
+			)
+		} else if let Some(string_literal) = self.accept_any(Token::StringLiteral("".to_string())) {
 			match string_literal {
 				Token::StringLiteral(s) => {
 					Expression::StringLiteral(
@@ -400,6 +424,19 @@ impl<'a> Parser<'a> {
 			if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
 				Expression::FuncCall(self.parse_func_call(path))
 			} else {
+				while self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
+					path.push_str("[");
+
+					let index_token = self.expect_any(Token::IntegerLiteral(0));
+					match index_token {
+						Token::IntegerLiteral(i) => path.push_str(i.to_string().as_ref()),
+						_ => panic!() // Should never happen
+					}
+
+					self.expect(Token::Symbol(Symbol::RightBracket));
+					path.push_str("]");
+				}
+
 				Expression::Variable(
 					Box::new(
 						VariableData { name: path }
@@ -440,6 +477,31 @@ impl<'a> Parser<'a> {
 		} else {
 			expr
 		}
+	}
+
+	fn parse_type(&mut self) -> Type {
+		let mut type_string: Type = String::new();
+		while self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
+			type_string.push_str("[");
+
+			if let Some(il) = self.accept_any(Token::IntegerLiteral(0)) {
+				match il {
+					Token::IntegerLiteral(i) => type_string.push_str(&i.to_string()),
+					_ => panic!() // Should never happen
+				}
+			}
+
+			self.expect(Token::Symbol(Symbol::RightBracket));
+			type_string.push_str("]")
+		}
+
+		let type_token = self.expect_any(Token::Identifier("".to_string()));
+		let type_name = match type_token {
+			Token::Identifier(i) => i,
+			_ => panic!() // Should never happen
+		};
+
+		type_string + &type_name
 	}
 
 	fn skip_newlines(&mut self) {

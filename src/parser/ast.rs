@@ -118,10 +118,16 @@ pub enum Expression {
 	IntegerLiteral(Box<IntegerLiteralData>),
 	BoolLiteral(Box<BoolLiteralData>),
 	Variable(Box<VariableData>),
+	Array(Box<ArrayData>),
 	FuncCall(Box<FuncCallData>),
 	Addition(Box<Expression>, Box<Expression>),
 	Equality(Box<Expression>, Box<Expression>),
 	Inequality(Box<Expression>, Box<Expression>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ArrayData {
+	pub items: std::vec::Vec<Expression>,
 }
 
 #[derive(Debug, Clone)]

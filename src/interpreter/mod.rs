@@ -24,10 +24,12 @@ pub struct Variable {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+	_Empty,
 	String(String),
 	Integer(i64),
 	Bool(bool),
 	Struct(std::collections::HashMap<String, Box<Value>>),
+	Array(Type, std::vec::Vec<Value>),
 }
 
 impl<'a> Interpreter<'a> {
@@ -193,16 +195,50 @@ impl<'a> Interpreter<'a> {
 
 		let mut path = var_assignment_data.name.split(".");
 
-		let mut current_ref = &mut vars.get_mut(AsRef::<str>::as_ref(path.next().unwrap())).unwrap().value;
+		let first_id = path.next().unwrap();
+		let mut current_ref = &mut vars.get_mut(AsRef::<str>::as_ref(first_id.split('[').next().unwrap())).unwrap().value;
 
+		let mut last_id = first_id;
 		for id in path {
 			let current_map = match *{current_ref} {
 				Value::Struct(ref mut map) => map,
 				_ => panic!("Interpreter error: cannot access field on non-struct")
 			};
 
-			current_ref = current_map.get_mut(id).unwrap();
+			current_ref = current_map.get_mut(id.split('[').next().unwrap()).unwrap();
+
+			last_id = id;
 		};
+
+		let mut indexes = last_id.split("[");
+		indexes.next();
+
+		for index in indexes {
+			let trimmed_index = index.trim_right_matches(']');
+
+			match trimmed_index {
+				"" => {
+					let new_cell = match *{current_ref} {
+						Value::Array(_, ref mut a) => {
+							a.push(Value::_Empty);
+							let last_index = a.len() - 1;
+							a.get_mut(last_index).unwrap()
+						},
+						_ => panic!("Interpreter error: can't push to non-array")
+					};
+
+					current_ref = new_cell;
+				},
+				n => {
+					let cell = match *{current_ref} {
+						Value::Array(_, ref mut a) => a.get_mut(n.parse::<usize>().unwrap()).unwrap(),
+						_ => panic!("Interpreter error: can't access index on non-array")
+					};
+
+					current_ref = cell;
+				},
+			}
+		}
 
 		*current_ref = value;
 	}
@@ -245,8 +281,10 @@ impl<'a> Interpreter<'a> {
 			Expression::Variable(ref v) => {
 				let mut path = v.name.split(".");
 
-				let mut current_ref = &vars.get(path.next().unwrap()).unwrap().value;
+				let first_id = path.next().unwrap();
+				let mut current_ref = &vars.get(first_id.split('[').next().unwrap()).unwrap().value;
 
+				let mut last_id = first_id;
 				for id in path {
 					let current_map = match *{current_ref} {
 						Value::Struct(ref map) => map,
@@ -254,9 +292,33 @@ impl<'a> Interpreter<'a> {
 					};
 
 					current_ref = current_map.get(id).unwrap();
+
+					last_id = id;
 				};
 
+				let mut indexes = last_id.split("[");
+				indexes.next();
+
+				for index in indexes {
+					let trimmed_index = index.trim_right_matches(']');
+
+					let cell = match *{current_ref} {
+						Value::Array(_, ref a) => a.get(trimmed_index.parse::<usize>().unwrap()).unwrap(),
+						_ => panic!("Interpreter error: can't access index on non-array")
+					};
+
+					current_ref = cell;
+				}
+
 				current_ref.clone()
+			},
+			Expression::Array(ref a) => {
+				let mut values: std::vec::Vec<Value> = vec![];
+				for item in &a.items {
+					values.push(self.value_from_expression(vars, item))
+				}
+
+				Value::Array("".to_string(), values)
 			},
 			Expression::FuncCall(ref fc) => {
 				self.execute_func_call(vars, fc).unwrap()
@@ -299,13 +361,29 @@ impl<'a> Interpreter<'a> {
 			Value::Integer(i) => println!("{}", i),
 			Value::Bool(b) => println!("{}", b),
 			Value::Struct(s) => println!("{:?}", s),
-			/*other => panic!("Interpreter error: invalid argument type for println (got {:?})", other)*/
+			Value::Array(_, a) => println!("{:?}", a),
+			other => panic!("Interpreter error: invalid argument type for println (got {:?})", other)
 		};
 
 		None
 	}
 
 	fn default_value(&self, var_type: Type) -> Value {
+		let mut chars = var_type.chars();
+		while let Some(c1) = chars.next() {
+			if c1 == '[' {
+				if let Some(c2) = chars.next() {
+					if c2.is_numeric() || c2 == ']' {
+						return Value::Array(var_type.split("]").nth(1).unwrap().to_string(), vec![])
+					} else {
+						panic!("Interpreter error: incorrect type")
+					}
+				}
+			} else {
+				break
+			}
+		}
+
 		match var_type.as_ref() {
 			"string" => Value::String("".to_string()),
 			"int" => Value::Integer(0),
