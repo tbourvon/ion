@@ -9,7 +9,7 @@ pub enum Keyword {
     If,
     While,
     Struct,
-    Return
+    Return,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -27,6 +27,10 @@ pub enum Symbol {
     Equal,
     EqualEqual,
     Plus,
+    Minus,
+    Times,
+    Over,
+    Modulo,
     NotEqual,
     ColonColon,
 }
@@ -216,6 +220,10 @@ impl<'a> Reader<'a> {
                 }
             },
             '+' => Ok(Token::Symbol(Symbol::Plus)),
+            '-' => Ok(Token::Symbol(Symbol::Minus)),
+            '*' => Ok(Token::Symbol(Symbol::Times)),
+            '/' => Ok(Token::Symbol(Symbol::Over)),
+            '%' => Ok(Token::Symbol(Symbol::Modulo)),
             '!' => {
                 match self.peek_char().unwrap() {
                     '=' => {

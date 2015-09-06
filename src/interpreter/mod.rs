@@ -28,6 +28,7 @@ pub enum Value {
 	String(String),
 	Integer(i64),
 	Bool(bool),
+	Char(char),
 	Struct(std::collections::HashMap<String, Box<Value>>),
 	Array(Type, std::vec::Vec<Value>),
 }
@@ -331,6 +332,7 @@ impl<'a> Interpreter<'a> {
 			Expression::StringLiteral(ref sl) => Value::String(sl.value.clone()),
 			Expression::IntegerLiteral(ref il) => Value::Integer(il.value),
 			Expression::BoolLiteral(ref bl) => Value::Bool(bl.value),
+			Expression::CharLiteral(ref cl) => Value::Char(cl.value),
 			Expression::Variable(ref v) => {
 				let mut path = v.path.iter();
 
@@ -405,6 +407,58 @@ impl<'a> Interpreter<'a> {
 
 				Value::Integer(integer1 + integer2)
 			},
+			Expression::Substraction(ref e1, ref e2) => {
+				let integer1 = match self.value_from_expression(vars, e1) {
+					Value::Integer(i) => i,
+					other => panic!("Interpreter error: incorrect expression for substraction: {:?}", other)
+				};
+
+				let integer2 = match self.value_from_expression(vars, e2) {
+					Value::Integer(i) => i,
+					other => panic!("Interpreter error: incorrect expression for substraction: {:?}", other)
+				};
+
+				Value::Integer(integer1 - integer2)
+			},
+			Expression::Multiplication(ref e1, ref e2) => {
+				let integer1 = match self.value_from_expression(vars, e1) {
+					Value::Integer(i) => i,
+					other => panic!("Interpreter error: incorrect expression for multiplication: {:?}", other)
+				};
+
+				let integer2 = match self.value_from_expression(vars, e2) {
+					Value::Integer(i) => i,
+					other => panic!("Interpreter error: incorrect expression for multiplication: {:?}", other)
+				};
+
+				Value::Integer(integer1 * integer2)
+			},
+			Expression::Division(ref e1, ref e2) => {
+				let integer1 = match self.value_from_expression(vars, e1) {
+					Value::Integer(i) => i,
+					other => panic!("Interpreter error: incorrect expression for division: {:?}", other)
+				};
+
+				let integer2 = match self.value_from_expression(vars, e2) {
+					Value::Integer(i) => i,
+					other => panic!("Interpreter error: incorrect expression for division: {:?}", other)
+				};
+
+				Value::Integer(integer1 / integer2)
+			},
+			Expression::Modulo(ref e1, ref e2) => {
+				let integer1 = match self.value_from_expression(vars, e1) {
+					Value::Integer(i) => i,
+					other => panic!("Interpreter error: incorrect expression for modulo: {:?}", other)
+				};
+
+				let integer2 = match self.value_from_expression(vars, e2) {
+					Value::Integer(i) => i,
+					other => panic!("Interpreter error: incorrect expression for modulo: {:?}", other)
+				};
+
+				Value::Integer(integer1 % integer2)
+			},
 			Expression::Equality(ref e1, ref e2) => {
 				let value1 = self.value_from_expression(vars, e1);
 				let value2 = self.value_from_expression(vars, e2);
@@ -429,6 +483,7 @@ impl<'a> Interpreter<'a> {
 			Value::String(s) => println!("{}", s),
 			Value::Integer(i) => println!("{}", i),
 			Value::Bool(b) => println!("{}", b),
+			Value::Char(c) => println!("{}", c),
 			Value::Struct(s) => println!("{:?}", s),
 			Value::Array(_, a) => println!("{:?}", a),
 			other => panic!("Interpreter error: invalid argument type for println (got {:?})", other)
@@ -472,6 +527,7 @@ impl<'a> Interpreter<'a> {
 			"string" => Value::String("".to_string()),
 			"int" => Value::Integer(0),
 			"bool" => Value::Bool(false),
+			"char" => Value::Char('\0'),
 			_ => {
 				let mut fields: std::collections::HashMap<String, Box<Value>> = std::collections::HashMap::new();
 

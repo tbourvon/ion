@@ -430,6 +430,17 @@ impl<'a> Parser<'a> {
 				},
 				_ => panic!() // Should never happen
 			}
+		} else if let Some(char_literal) = self.accept_any(Token::CharLiteral('\0')) {
+			match char_literal {
+				Token::CharLiteral(c) => {
+					Expression::CharLiteral(
+						Box::new(
+							CharLiteralData { value: c }
+						)
+					)
+				},
+				_ => panic!() // Should never happen
+			}
 		} else if let Some(identifier) = self.accept_any(Token::Identifier("".to_string())) {
 			let mut path: Path = vec![];
 
@@ -524,6 +535,42 @@ impl<'a> Parser<'a> {
 
 		if self.accept(Token::Symbol(Symbol::Plus)).is_some() {
 			Expression::Addition(
+				Box::new(
+					expr
+				),
+				Box::new(
+					self.parse_expression()
+				)
+			)
+		} else if self.accept(Token::Symbol(Symbol::Minus)).is_some() {
+			Expression::Substraction(
+				Box::new(
+					expr
+				),
+				Box::new(
+					self.parse_expression()
+				)
+			)
+		} else if self.accept(Token::Symbol(Symbol::Times)).is_some() {
+			Expression::Multiplication(
+				Box::new(
+					expr
+				),
+				Box::new(
+					self.parse_expression()
+				)
+			)
+		} else if self.accept(Token::Symbol(Symbol::Over)).is_some() {
+			Expression::Division(
+				Box::new(
+					expr
+				),
+				Box::new(
+					self.parse_expression()
+				)
+			)
+		} else if self.accept(Token::Symbol(Symbol::Modulo)).is_some() {
+			Expression::Modulo(
 				Box::new(
 					expr
 				),

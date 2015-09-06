@@ -117,10 +117,15 @@ pub enum Expression {
 	StringLiteral(Box<StringLiteralData>),
 	IntegerLiteral(Box<IntegerLiteralData>),
 	BoolLiteral(Box<BoolLiteralData>),
+	CharLiteral(Box<CharLiteralData>),
 	Variable(Box<VariableData>),
 	Array(Box<ArrayData>),
 	FuncCall(Box<FuncCallData>),
 	Addition(Box<Expression>, Box<Expression>),
+	Substraction(Box<Expression>, Box<Expression>),
+	Multiplication(Box<Expression>, Box<Expression>),
+	Division(Box<Expression>, Box<Expression>),
+	Modulo(Box<Expression>, Box<Expression>),
 	Equality(Box<Expression>, Box<Expression>),
 	Inequality(Box<Expression>, Box<Expression>),
 }
@@ -168,4 +173,9 @@ pub struct IntegerLiteralData {
 #[derive(Debug, Clone)]
 pub struct BoolLiteralData {
 	pub value: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CharLiteralData {
+	pub value: char,
 }
