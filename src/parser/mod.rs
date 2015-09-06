@@ -397,6 +397,12 @@ impl<'a> Parser<'a> {
 					ArrayData { items: items }
 				)
 			)
+		} else if self.accept(Token::Symbol(Symbol::Hash)).is_some() {
+			Expression::Count(
+				Box::new(
+					self.parse_expression()
+				)
+			)
 		} else if let Some(string_literal) = self.accept_any(Token::StringLiteral("".to_string())) {
 			match string_literal {
 				Token::StringLiteral(s) => {

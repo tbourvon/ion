@@ -128,6 +128,7 @@ pub enum Expression {
 	Modulo(Box<Expression>, Box<Expression>),
 	Equality(Box<Expression>, Box<Expression>),
 	Inequality(Box<Expression>, Box<Expression>),
+	Count(Box<Expression>),
 }
 
 #[derive(Debug, Clone)]

@@ -33,6 +33,7 @@ pub enum Symbol {
     Modulo,
     NotEqual,
     ColonColon,
+    Hash,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -233,6 +234,7 @@ impl<'a> Reader<'a> {
                     _ => Err("Lexer error: failed to parse symbol")
                 }
             },
+            '#' => Ok(Token::Symbol(Symbol::Hash)),
             _ => Err("Lexer error: failed to parse symbol"),
         };
 

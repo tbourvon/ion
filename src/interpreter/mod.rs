@@ -364,6 +364,7 @@ impl<'a> Interpreter<'a> {
 										Value::Integer(i) => {
 											let cell = match *{current_ref} {
 												Value::Array(_, ref a) => a.get(i as usize).unwrap(),
+												Value::String(ref s) => return Value::Char(s.chars().nth(i as usize).unwrap()), // TODO: perform checks
 												_ => panic!("Interpreter error: can't access index on non-array")
 											};
 
@@ -393,6 +394,13 @@ impl<'a> Interpreter<'a> {
 			},
 			Expression::FuncCall(ref fc) => {
 				self.execute_func_call(vars, fc).unwrap()
+			},
+			Expression::Count(ref e) => {
+				match self.value_from_expression(vars, e) {
+					Value::Array(_, ref a) => Value::Integer(a.len() as i64),
+					Value::String(ref s) => Value::Integer(s.len() as i64),
+					_ => panic!("Interpreter error: can't get count on non-(array/string)")
+				}
 			},
 			Expression::Addition(ref e1, ref e2) => {
 				let integer1 = match self.value_from_expression(vars, e1) {
