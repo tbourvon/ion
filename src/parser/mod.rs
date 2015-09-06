@@ -380,8 +380,13 @@ impl<'a> Parser<'a> {
 		)
 	}
 
-	fn parse_expression(&mut self) -> Expression {
-		let expr = if self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
+	fn parse_expression(&mut self) -> Expression { // FIXME: operator precedence
+		let expr = if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
+			let e = self.parse_expression();
+			self.expect(Token::Symbol(Symbol::RightParenthesis));
+
+			e
+		} else if self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
 			let mut items: std::vec::Vec<Expression> = vec![];
 			while self.accept(Token::Symbol(Symbol::RightBracket)).is_none() {
 				items.push(self.parse_expression());
