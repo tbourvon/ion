@@ -183,7 +183,18 @@ impl<'a> Parser<'a> {
 		} else if let Some(identifier) = self.accept_any(Token::Identifier("".to_string())) {
 			match identifier {
 				Token::Identifier(i) => {
-					let mut path = i;
+					let mut path: Path = vec![];
+
+					path.push(
+						Box::new(
+							PathPart::IdentifierPathPart(
+								Box::new(
+									IdentifierPathPartData { identifier: i }
+								)
+							)
+						)
+					);
+
 					while self.accept(Token::Symbol(Symbol::ColonColon)).is_some() {
 						let next_path_token = self.expect_any(Token::Identifier("".to_string()));
 						let next_path = match next_path_token {
@@ -191,40 +202,67 @@ impl<'a> Parser<'a> {
 							_ => panic!() // Should never happen
 						};
 
-						path.push_str("::");
-						path.push_str(next_path.as_ref());
-					}
+						path.push(
+							Box::new(PathPart::ModulePathPart)
+						);
 
-					while self.accept(Token::Symbol(Symbol::Dot)).is_some() {
-						let next_path_token = self.expect_any(Token::Identifier("".to_string()));
-						let next_path = match next_path_token {
-							Token::Identifier(id) => id,
-							_ => panic!() // Should never happen
-						};
-
-						path.push_str(".");
-						path.push_str(next_path.as_ref());
+						path.push(
+							Box::new(
+								PathPart::IdentifierPathPart(
+									Box::new(
+										IdentifierPathPartData { identifier: next_path }
+									)
+								)
+							)
+						);
 					}
 
 					if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
 						BlockStatement::FuncCall(self.parse_func_call(path))
 					} else {
-						while self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
-							path.push_str("[");
+						loop {
+							if self.accept(Token::Symbol(Symbol::Dot)).is_some() {
+								let next_path_token = self.expect_any(Token::Identifier("".to_string()));
+								let next_path = match next_path_token {
+									Token::Identifier(id) => id,
+									_ => panic!() // Should never happen
+								};
 
-							let index_token = self.accept_any(Token::IntegerLiteral(0));
-							match index_token {
-								Some(t) => {
-									match t {
-										Token::IntegerLiteral(i) => path.push_str(i.to_string().as_ref()),
-										_ => panic!() // Should never happen
-									}
-								},
-								None => (),
+								path.push(
+									Box::new(PathPart::FieldPathPart)
+								);
+
+								path.push(
+									Box::new(
+										PathPart::IdentifierPathPart(
+											Box::new(
+												IdentifierPathPartData { identifier: next_path }
+											)
+										)
+									)
+								);
+							} else if self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
+								let index = if self.accept(Token::Symbol(Symbol::RightBracket)).is_some() {
+									None
+								} else {
+									let expr = self.parse_expression();
+									self.expect(Token::Symbol(Symbol::RightBracket));
+
+									Some(expr)
+								};
+
+								path.push(
+									Box::new(
+										PathPart::IndexPathPart(
+											Box::new(
+												IndexPathPartData { index: index }
+											)
+										)
+									)
+								);
+							} else {
+								break
 							};
-
-							self.expect(Token::Symbol(Symbol::RightBracket));
-							path.push_str("]");
 						}
 
 						if self.accept(Token::Symbol(Symbol::Equal)).is_some() {
@@ -283,7 +321,7 @@ impl<'a> Parser<'a> {
 		)
 	}
 
-	fn parse_func_call(&mut self, name: String) -> Box<FuncCallData> {
+	fn parse_func_call(&mut self, path: Path) -> Box<FuncCallData> {
 		let mut args: std::vec::Vec<Box<FuncCallArgData>> = vec![];
 		while self.accept(Token::Symbol(Symbol::RightParenthesis)).is_none() {
 			args.push(
@@ -300,7 +338,7 @@ impl<'a> Parser<'a> {
 
 		Box::new(
 			FuncCallData {
-				name: name,
+				path: path,
 				arguments: args,
 			}
 		)
@@ -332,11 +370,11 @@ impl<'a> Parser<'a> {
 		)
 	}
 
-	fn parse_var_assignment(&mut self, name: String) -> Box<VarAssignmentData> {
+	fn parse_var_assignment(&mut self, path: Path) -> Box<VarAssignmentData> {
 		let expression = self.parse_expression();
 		Box::new(
 			VarAssignmentData {
-				name: name,
+				path: path,
 				value: expression,
 			}
 		)
@@ -393,12 +431,23 @@ impl<'a> Parser<'a> {
 				_ => panic!() // Should never happen
 			}
 		} else if let Some(identifier) = self.accept_any(Token::Identifier("".to_string())) {
-			let id = match identifier {
+			let mut path: Path = vec![];
+
+			let i = match identifier {
 				Token::Identifier(i) => i,
 				_ => panic!() // Should never happen
 			};
 
-			let mut path = id;
+			path.push(
+				Box::new(
+					PathPart::IdentifierPathPart(
+						Box::new(
+							IdentifierPathPartData { identifier: i }
+						)
+					)
+				)
+			);
+
 			while self.accept(Token::Symbol(Symbol::ColonColon)).is_some() {
 				let next_path_token = self.expect_any(Token::Identifier("".to_string()));
 				let next_path = match next_path_token {
@@ -406,40 +455,66 @@ impl<'a> Parser<'a> {
 					_ => panic!() // Should never happen
 				};
 
-				path.push_str("::");
-				path.push_str(next_path.as_ref());
-			}
+				path.push(
+					Box::new(PathPart::ModulePathPart)
+				);
 
-			while self.accept(Token::Symbol(Symbol::Dot)).is_some() {
-				let next_path_token = self.expect_any(Token::Identifier("".to_string()));
-				let next_path = match next_path_token {
-					Token::Identifier(id) => id,
-					_ => panic!() // Should never happen
-				};
-
-				path.push_str(".");
-				path.push_str(next_path.as_ref());
+				path.push(
+					Box::new(
+						PathPart::IdentifierPathPart(
+							Box::new(
+								IdentifierPathPartData { identifier: next_path }
+							)
+						)
+					)
+				);
 			}
 
 			if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
 				Expression::FuncCall(self.parse_func_call(path))
 			} else {
-				while self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
-					path.push_str("[");
+				loop {
+					if self.accept(Token::Symbol(Symbol::Dot)).is_some() {
+						let next_path_token = self.expect_any(Token::Identifier("".to_string()));
+						let next_path = match next_path_token {
+							Token::Identifier(id) => id,
+							_ => panic!() // Should never happen
+						};
 
-					let index_token = self.expect_any(Token::IntegerLiteral(0));
-					match index_token {
-						Token::IntegerLiteral(i) => path.push_str(i.to_string().as_ref()),
-						_ => panic!() // Should never happen
-					}
+						path.push(
+							Box::new(PathPart::FieldPathPart)
+						);
 
-					self.expect(Token::Symbol(Symbol::RightBracket));
-					path.push_str("]");
+						path.push(
+							Box::new(
+								PathPart::IdentifierPathPart(
+									Box::new(
+										IdentifierPathPartData { identifier: next_path }
+									)
+								)
+							)
+						);
+					} else if self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
+						let expr = self.parse_expression();
+						self.expect(Token::Symbol(Symbol::RightBracket));
+
+						path.push(
+							Box::new(
+								PathPart::IndexPathPart(
+									Box::new(
+										IndexPathPartData { index: Some(expr) }
+									)
+								)
+							)
+						);
+					} else {
+						break
+					};
 				}
 
 				Expression::Variable(
 					Box::new(
-						VariableData { name: path }
+						VariableData { path: path }
 					)
 				)
 			}

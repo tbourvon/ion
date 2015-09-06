@@ -3,14 +3,13 @@ use std;
 use lexer;
 use parser;
 use std::fs::File;
-use std::path::Path;
 use std::io::prelude::*;
 
 pub struct Interpreter<'a> {
 	ast: &'a Ast,
 	funcs: std::collections::HashMap<String, FuncDeclData>,
 	structs: std::collections::HashMap<String, StructDeclData>,
-	imports: std::vec::Vec<Box<Ast>>,
+	imports: std::collections::HashMap<String, Box<Ast>>,
 }
 
 type InterpreterVars = std::collections::HashMap<String, Variable>;
@@ -38,7 +37,7 @@ impl<'a> Interpreter<'a> {
 			ast: ast,
 			funcs: std::collections::HashMap::new(),
 			structs: std::collections::HashMap::new(),
-			imports: vec![],
+			imports: std::collections::HashMap::new(),
 		}
 	}
 
@@ -65,7 +64,15 @@ impl<'a> Interpreter<'a> {
 		};
 
 		let main_func_call = FuncCallData {
-			name: "main".to_string(),
+			path: vec![
+				Box::new(
+					PathPart::IdentifierPathPart(
+						Box::new(
+							IdentifierPathPartData { identifier: "main".to_string() }
+						)
+					)
+				)
+			],
 			arguments: vec![],
 		};
 
@@ -75,7 +82,7 @@ impl<'a> Interpreter<'a> {
 
 	fn execute_import(&mut self, import_data: &ImportData) {
 		let path_string = import_data.path.clone() + ".ion";
-	    let path = Path::new(AsRef::<str>::as_ref(&path_string[..]));
+	    let path = std::path::Path::new(AsRef::<str>::as_ref(&path_string[..]));
 	    let mut file = match File::open(&path) {
 	        Ok(file) => file,
 	        Err(_) => panic!(),
@@ -88,28 +95,10 @@ impl<'a> Interpreter<'a> {
 	    let mut parser = parser::Parser::new(&mut reader);
 	    let ast = parser.parse();
 
-		self.imports.push(Box::new((*ast).clone()));
-
-		let mut iter = self.imports.last().unwrap().statements.iter();
-		loop { let statement = iter.next();
-			match statement {
-				Some(s) => {
-					match *s {
-						Statement::FuncDecl(ref fd) => {
-							let mut path = import_data.path.clone() + "::";
-							path.push_str(fd.name.as_ref());
-							self.funcs.insert(path, *fd.clone());
-						},
-						_ => ()
-					}
-				},
-				None => break,
-			}
-
-		}
+		self.imports.insert(import_data.path.clone(), Box::new((*ast).clone()));
 	}
 
-	fn execute_block_statement(&self, vars: &mut InterpreterVars, block_statement: &'a BlockStatement) -> Option<Value> {
+	fn execute_block_statement(&self, vars: *mut InterpreterVars, block_statement: &'a BlockStatement) -> Option<Value> {
 		match *block_statement {
 			BlockStatement::FuncCall(ref fc) => { self.execute_func_call(vars, fc); None },
 			BlockStatement::VarDecl(ref vd) => { self.execute_var_decl(vars, vd); None },
@@ -120,130 +109,191 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn execute_return(&self, vars: &mut InterpreterVars, return_data: &ReturnData) -> Option<Value> {
+	fn execute_return(&self, vars: *mut InterpreterVars, return_data: &ReturnData) -> Option<Value> {
 		Some(self.value_from_expression(vars, &return_data.value))
 	}
 
-	fn execute_func_call(&self, vars: &mut InterpreterVars, func_call_data: &FuncCallData) -> Option<Value> {
-		match func_call_data.name.as_ref() {
-			"println" => self.builtin_println(vars, func_call_data),
-			n => {
-				let mut param_count = 0;
-				for param in &self.funcs.get(n).unwrap().parameters {
-					let variable = Variable {
-						name: param.name.clone(),
-						var_type: param.param_type.clone(),
-						value: {
-							if param_count < func_call_data.arguments.len() {
-								self.value_from_expression(vars, &func_call_data.arguments.get(param_count).unwrap().value)
-							} else {
-								if let Some(ref e) = param.default_value {
-									self.value_from_expression(vars, e)
-								} else {
-									panic!("Interpreter error: expected argument for {:?}", param.name)
-								}
-							}
-						}
-					};
-
-					vars.insert(
-						param.name.clone(),
-						variable
-					);
-
-					param_count += 1;
+	fn execute_func_call(&self, vars: *mut InterpreterVars, func_call_data: &FuncCallData) -> Option<Value> {
+		fn is_builtin_func(path: &Path, name: &str) -> bool {
+			if path.len() == 1 {
+				match **path.get(0).unwrap() {
+					PathPart::IdentifierPathPart(ref ipp) => ipp.identifier == name,
+					_ => false,
 				}
+			} else {
+				false
+			}
+		}
 
-				let mut return_value: Option<Value> = None;
-				for statement in &self.funcs.get(n).unwrap().statements {
-					match self.execute_block_statement(vars, statement) {
-						Some(v) => {
-							return_value = Some(v);
+		if is_builtin_func(&func_call_data.path, "println") {
+			self.builtin_println(vars, func_call_data)
+		} else {
+			let mut module_string = String::new();
+			let mut last_id = String::new();
+			for path_part in &func_call_data.path {
+				match **path_part {
+					PathPart::IdentifierPathPart(ref ipp) => {
+						if last_id != "" {
+							module_string.push_str(last_id.as_ref());
+						};
+						last_id = ipp.identifier.clone();
+					},
+					PathPart::ModulePathPart => {
+						module_string.push_str("::");
+					},
+					_ => panic!("Interpreter error: invalid function path")
+				}
+			};
+
+			let func_decl = if module_string == "" {
+				self.funcs.get(&last_id).unwrap()
+			} else {
+				let mut import_func_decl: Option<&FuncDeclData> = None;
+				for statement in &self.imports.get(&module_string).unwrap().statements {
+					match *statement {
+						Statement::FuncDecl(ref fd) => {
+							import_func_decl = Some(fd);
 							break
 						},
-						None => ()
+						_ => (),
 					}
 				}
 
-				for param in &self.funcs.get(n).unwrap().parameters {
-					vars.remove(AsRef::<str>::as_ref(&param.name[..]));
+				import_func_decl.unwrap()
+			};
+
+			let mut param_count = 0;
+			for param in &func_decl.parameters {
+				let variable = Variable {
+					name: param.name.clone(),
+					var_type: param.param_type.clone(),
+					value: {
+						if param_count < func_call_data.arguments.len() {
+							self.value_from_expression(vars, &func_call_data.arguments.get(param_count).unwrap().value)
+						} else {
+							if let Some(ref e) = param.default_value {
+								self.value_from_expression(vars, e)
+							} else {
+								panic!("Interpreter error: expected argument for {:?}", param.name)
+							}
+						}
+					}
+				};
+
+				unsafe {
+					(*vars).insert(
+						param.name.clone(),
+						variable
+					);
 				}
 
-				return_value
+				param_count += 1;
 			}
+
+			let mut return_value: Option<Value> = None;
+			for statement in &func_decl.statements {
+				match self.execute_block_statement(vars, statement) {
+					Some(v) => {
+						return_value = Some(v);
+						break
+					},
+					None => ()
+				}
+			}
+
+			for param in &func_decl.parameters {
+				unsafe {
+					(*vars).remove(AsRef::<str>::as_ref(&param.name[..]));
+				}
+			}
+
+			return_value
 		}
 	}
 
-	fn execute_var_decl(&self, vars: &mut InterpreterVars, var_decl_data: &'a VarDeclData) {
+	fn execute_var_decl(&self, vars: *mut InterpreterVars, var_decl_data: &'a VarDeclData) {
 		let value = match var_decl_data.value {
 			Some(ref v) => self.value_from_expression(vars, v),
 			None => self.default_value(var_decl_data.var_type.clone()),
 		};
 
-		vars.insert(
-			var_decl_data.name.clone(),
-			Variable {
-				name: var_decl_data.name.clone(),
-				var_type: var_decl_data.var_type.clone(),
-				value: value,
-			}
-		);
+		unsafe {
+			(*vars).insert(
+				var_decl_data.name.clone(),
+				Variable {
+					name: var_decl_data.name.clone(),
+					var_type: var_decl_data.var_type.clone(),
+					value: value,
+				}
+			);
+		}
 	}
 
-	fn execute_var_assignment(&self, vars: &mut InterpreterVars, var_assignment_data: &VarAssignmentData) {
+	fn execute_var_assignment(&self, vars: *mut InterpreterVars, var_assignment_data: &VarAssignmentData) {
 		let value = self.value_from_expression(vars, &var_assignment_data.value);
 
-		let mut path = var_assignment_data.name.split(".");
+		let mut path = var_assignment_data.path.iter();
 
-		let first_id = path.next().unwrap();
-		let mut current_ref = &mut vars.get_mut(AsRef::<str>::as_ref(first_id.split('[').next().unwrap())).unwrap().value;
-
-		let mut last_id = first_id;
-		for id in path {
-			let current_map = match *{current_ref} {
-				Value::Struct(ref mut map) => map,
-				_ => panic!("Interpreter error: cannot access field on non-struct")
-			};
-
-			current_ref = current_map.get_mut(id.split('[').next().unwrap()).unwrap();
-
-			last_id = id;
+		let mut current_ref = match **path.next().unwrap() {
+			PathPart::IdentifierPathPart(ref ipp) => unsafe {
+			&mut (*vars).get_mut(AsRef::<str>::as_ref(&ipp.identifier[..])).unwrap().value },
+			_ => panic!("Interpreter error: incorrect var path")
 		};
 
-		let mut indexes = last_id.split("[");
-		indexes.next();
+		let mut is_field = false;
+		for path_part in path {
+			match **path_part {
+				PathPart::FieldPathPart if !is_field => is_field = true,
+				PathPart::IdentifierPathPart(ref ipp) if is_field => {
+					let current_map = match *{current_ref} {
+						Value::Struct(ref mut map) => map,
+						_ => panic!("Interpreter error: cannot access field on non-struct")
+					};
 
-		for index in indexes {
-			let trimmed_index = index.trim_right_matches(']');
+					current_ref = current_map.get_mut(&ipp.identifier).unwrap();
 
-			match trimmed_index {
-				"" => {
-					let new_cell = match *{current_ref} {
-						Value::Array(_, ref mut a) => {
-							a.push(Value::_Empty);
-							let last_index = a.len() - 1;
-							a.get_mut(last_index).unwrap()
+					is_field = false;
+				},
+				PathPart::IndexPathPart(ref ipp) => {
+					match ipp.index {
+						Some(ref expr) => {
+							let index_value = self.value_from_expression(vars, expr);
+							match index_value {
+								Value::Integer(i) => {
+									let cell = match *{current_ref} {
+										Value::Array(_, ref mut a) => a.get_mut(i as usize).unwrap(),
+										_ => panic!("Interpreter error: can't access index on non-array")
+									};
+
+									current_ref = cell;
+								},
+								_ => panic!("Interpreter error: invalid index type for array")
+							}
 						},
-						_ => panic!("Interpreter error: can't push to non-array")
-					};
+						None => {
+							let new_cell = match *{current_ref} {
+								Value::Array(_, ref mut a) => {
+									a.push(Value::_Empty);
+									let last_index = a.len() - 1;
+									a.get_mut(last_index).unwrap()
+								},
+								_ => panic!("Interpreter error: can't push to non-array")
+							};
 
-					current_ref = new_cell;
-				},
-				n => {
-					let cell = match *{current_ref} {
-						Value::Array(_, ref mut a) => a.get_mut(n.parse::<usize>().unwrap()).unwrap(),
-						_ => panic!("Interpreter error: can't access index on non-array")
-					};
+							current_ref = new_cell;
+						},
+					}
 
-					current_ref = cell;
+					is_field = false;
 				},
+				_ => panic!("Interpreter error: invalid path for var assignment"),
 			}
-		}
+		};
 
 		*current_ref = value;
 	}
 
-	fn execute_if(&self, vars: &mut InterpreterVars, if_data: &'a IfData) {
+	fn execute_if(&self, vars: *mut InterpreterVars, if_data: &'a IfData) {
 		match self.value_from_expression(vars, &if_data.condition) {
 			Value::Bool(b) => {
 				if b {
@@ -256,7 +306,7 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn execute_while(&self, vars: &mut InterpreterVars, while_data: &'a WhileData) {
+	fn execute_while(&self, vars: *mut InterpreterVars, while_data: &'a WhileData) {
 		loop {
 			match self.value_from_expression(vars, &while_data.condition) {
 				Value::Bool(b) => {
@@ -273,42 +323,58 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn value_from_expression(&self, vars: &mut InterpreterVars, expression: &Expression) -> Value {
+	fn value_from_expression(&self, vars: *mut InterpreterVars, expression: &Expression) -> Value {
 		match *expression {
 			Expression::StringLiteral(ref sl) => Value::String(sl.value.clone()),
 			Expression::IntegerLiteral(ref il) => Value::Integer(il.value),
 			Expression::BoolLiteral(ref bl) => Value::Bool(bl.value),
 			Expression::Variable(ref v) => {
-				let mut path = v.name.split(".");
+				let mut path = v.path.iter();
 
-				let first_id = path.next().unwrap();
-				let mut current_ref = &vars.get(first_id.split('[').next().unwrap()).unwrap().value;
-
-				let mut last_id = first_id;
-				for id in path {
-					let current_map = match *{current_ref} {
-						Value::Struct(ref map) => map,
-						_ => panic!("Interpreter error: cannot access field on non-struct")
-					};
-
-					current_ref = current_map.get(id).unwrap();
-
-					last_id = id;
+				let mut current_ref = match **path.next().unwrap() {
+					PathPart::IdentifierPathPart(ref ipp) =>
+					unsafe { &(*vars).get(AsRef::<str>::as_ref(&ipp.identifier[..])).unwrap().value },
+					_ => panic!("Interpreter error: incorrect var path")
 				};
 
-				let mut indexes = last_id.split("[");
-				indexes.next();
+				let mut is_field = false;
+				for path_part in path {
+					match **path_part {
+						PathPart::FieldPathPart if !is_field => is_field = true,
+						PathPart::IdentifierPathPart(ref ipp) if is_field => {
+							let current_map = match *{current_ref} {
+								Value::Struct(ref map) => map,
+								_ => panic!("Interpreter error: cannot access field on non-struct")
+							};
 
-				for index in indexes {
-					let trimmed_index = index.trim_right_matches(']');
+							current_ref = current_map.get(&ipp.identifier).unwrap();
 
-					let cell = match *{current_ref} {
-						Value::Array(_, ref a) => a.get(trimmed_index.parse::<usize>().unwrap()).unwrap(),
-						_ => panic!("Interpreter error: can't access index on non-array")
-					};
+							is_field = false;
+						},
+						PathPart::IndexPathPart(ref ipp) => {
+							match ipp.index {
+								Some(ref expr) => {
+									let index_value = self.value_from_expression(vars, expr);
+									match index_value {
+										Value::Integer(i) => {
+											let cell = match *{current_ref} {
+												Value::Array(_, ref a) => a.get(i as usize).unwrap(),
+												_ => panic!("Interpreter error: can't access index on non-array")
+											};
 
-					current_ref = cell;
-				}
+											current_ref = cell;
+										},
+										_ => panic!("Interpreter error: invalid index type for array")
+									}
+								},
+								None => panic!("Interpreter error: arrray expression requires an index")
+							}
+
+							is_field = false;
+						},
+						_ => panic!("Interpreter error: invalid path for var assignment"),
+					}
+				};
 
 				current_ref.clone()
 			},
@@ -351,7 +417,7 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn builtin_println(&self, vars: &mut InterpreterVars, func_call_data: &FuncCallData) -> Option<Value> {
+	fn builtin_println(&self, vars: *mut InterpreterVars, func_call_data: &FuncCallData) -> Option<Value> {
 		if func_call_data.arguments.len() != 1 {
 			panic!("Interpreter error: invalid argument count for println")
 		};

@@ -68,13 +68,13 @@ pub struct WhileData {
 
 #[derive(Debug, Clone)]
 pub struct VarAssignmentData {
-	pub name: String,
+	pub path: Path,
 	pub value: Expression,
 }
 
 #[derive(Debug, Clone)]
 pub struct FuncCallData {
-	pub name: String,
+	pub path: Path,
 	pub arguments: std::vec::Vec<Box<FuncCallArgData>>,
 }
 
@@ -132,7 +132,27 @@ pub struct ArrayData {
 
 #[derive(Debug, Clone)]
 pub struct VariableData {
-	pub name: String,
+	pub path: Path,
+}
+
+pub type Path = std::vec::Vec<Box<PathPart>>;
+
+#[derive(Debug, Clone)]
+pub enum PathPart { // TODO: rework with recursive data structures... The problem right now is that we read from left to right, but recursive data structures would imply right to left construction.
+	ModulePathPart,
+	FieldPathPart,
+	IndexPathPart(Box<IndexPathPartData>),
+	IdentifierPathPart(Box<IdentifierPathPartData>),
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexPathPartData {
+	pub index: Option<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IdentifierPathPartData {
+	pub identifier: String,
 }
 
 #[derive(Debug, Clone)]
