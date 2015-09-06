@@ -380,123 +380,173 @@ impl<'a> Parser<'a> {
 		)
 	}
 
-	fn parse_expression(&mut self) -> Expression { // FIXME: operator precedence
-		let expr = if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
-			let e = self.parse_expression();
-			self.expect(Token::Symbol(Symbol::RightParenthesis));
+	fn parse_expression(&mut self) -> Expression {
+		self.parse_expression_rec(None, true)
+	}
 
-			e
-		} else if self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
-			let mut items: std::vec::Vec<Expression> = vec![];
-			while self.accept(Token::Symbol(Symbol::RightBracket)).is_none() {
-				items.push(self.parse_expression());
-				if self.current_token == Token::Symbol(Symbol::RightBracket) {
-					self.accept(Token::Symbol(Symbol::Comma));
+	fn parse_expression_rec(&mut self, prev_expr: Option<Expression>, greedy: bool) -> Expression {
+		match prev_expr {
+			Some(expr) => {
+				let new_expr = if self.accept(Token::Symbol(Symbol::Plus)).is_some() {
+					Expression::Addition(
+						Box::new(
+							expr
+						),
+						Box::new(
+							self.parse_expression_rec(None, false)
+						)
+					)
+				} else if self.accept(Token::Symbol(Symbol::Minus)).is_some() {
+					Expression::Substraction(
+						Box::new(
+							expr
+						),
+						Box::new(
+							self.parse_expression_rec(None, false)
+						)
+					)
+				} else if self.accept(Token::Symbol(Symbol::Times)).is_some() {
+					Expression::Multiplication(
+						Box::new(
+							expr
+						),
+						Box::new(
+							self.parse_expression_rec(None, false)
+						)
+					)
+				} else if self.accept(Token::Symbol(Symbol::Over)).is_some() {
+					Expression::Division(
+						Box::new(
+							expr
+						),
+						Box::new(
+							self.parse_expression_rec(None, false)
+						)
+					)
+				} else if self.accept(Token::Symbol(Symbol::Modulo)).is_some() {
+					Expression::Modulo(
+						Box::new(
+							expr
+						),
+						Box::new(
+							self.parse_expression_rec(None, false)
+						)
+					)
+				} else if self.accept(Token::Symbol(Symbol::EqualEqual)).is_some() {
+					Expression::Equality(
+						Box::new(
+							expr
+						),
+						Box::new(
+							self.parse_expression_rec(None, false)
+						)
+					)
+				} else if self.accept(Token::Symbol(Symbol::NotEqual)).is_some() {
+					Expression::Inequality(
+						Box::new(
+							expr
+						),
+						Box::new(
+							self.parse_expression_rec(None, false)
+						)
+					)
 				} else {
-					self.expect(Token::Symbol(Symbol::Comma));
-				};
-			};
-
-			Expression::Array(
-				Box::new(
-					ArrayData { items: items }
-				)
-			)
-		} else if self.accept(Token::Symbol(Symbol::Hash)).is_some() {
-			Expression::Count(
-				Box::new(
-					self.parse_expression()
-				)
-			)
-		} else if let Some(string_literal) = self.accept_any(Token::StringLiteral("".to_string())) {
-			match string_literal {
-				Token::StringLiteral(s) => {
-					Expression::StringLiteral(
-						Box::new(
-							StringLiteralData { value: s }
-						)
-					)
-				},
-				_ => panic!() // Should never happen
-			}
-		} else if let Some(integer_literal) = self.accept_any(Token::IntegerLiteral(0)) {
-			match integer_literal {
-				Token::IntegerLiteral(i) => {
-					Expression::IntegerLiteral(
-						Box::new(
-							IntegerLiteralData { value: i }
-						)
-					)
-				},
-				_ => panic!() // Should never happen
-			}
-		} else if let Some(bool_literal) = self.accept_any(Token::BoolLiteral(false)) {
-			match bool_literal {
-				Token::BoolLiteral(b) => {
-					Expression::BoolLiteral(
-						Box::new(
-							BoolLiteralData { value: b }
-						)
-					)
-				},
-				_ => panic!() // Should never happen
-			}
-		} else if let Some(char_literal) = self.accept_any(Token::CharLiteral('\0')) {
-			match char_literal {
-				Token::CharLiteral(c) => {
-					Expression::CharLiteral(
-						Box::new(
-							CharLiteralData { value: c }
-						)
-					)
-				},
-				_ => panic!() // Should never happen
-			}
-		} else if let Some(identifier) = self.accept_any(Token::Identifier("".to_string())) {
-			let mut path: Path = vec![];
-
-			let i = match identifier {
-				Token::Identifier(i) => i,
-				_ => panic!() // Should never happen
-			};
-
-			path.push(
-				Box::new(
-					PathPart::IdentifierPathPart(
-						Box::new(
-							IdentifierPathPartData { identifier: i }
-						)
-					)
-				)
-			);
-
-			while self.accept(Token::Symbol(Symbol::ColonColon)).is_some() {
-				let next_path_token = self.expect_any(Token::Identifier("".to_string()));
-				let next_path = match next_path_token {
-					Token::Identifier(id) => id,
-					_ => panic!() // Should never happen
+					return expr
 				};
 
-				path.push(
-					Box::new(PathPart::ModulePathPart)
-				);
+				self.parse_expression_rec(Some(new_expr), true)
+			},
+			None => {
+				let expr = if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
+					let e = self.parse_expression_rec(None, true);
+					self.expect(Token::Symbol(Symbol::RightParenthesis));
 
-				path.push(
-					Box::new(
-						PathPart::IdentifierPathPart(
-							Box::new(
-								IdentifierPathPartData { identifier: next_path }
+					e
+				} else if self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
+					let mut items: std::vec::Vec<Expression> = vec![];
+					while self.accept(Token::Symbol(Symbol::RightBracket)).is_none() {
+						items.push(self.parse_expression());
+						if self.current_token == Token::Symbol(Symbol::RightBracket) {
+							self.accept(Token::Symbol(Symbol::Comma));
+						} else {
+							self.expect(Token::Symbol(Symbol::Comma));
+						};
+					};
+
+					Expression::Array(
+						Box::new(
+							ArrayData { items: items }
+						)
+					)
+				} else if self.accept(Token::Symbol(Symbol::Hash)).is_some() {
+					Expression::Count(
+						Box::new(
+							self.parse_expression()
+						)
+					)
+				} else if let Some(string_literal) = self.accept_any(Token::StringLiteral("".to_string())) {
+					match string_literal {
+						Token::StringLiteral(s) => {
+							Expression::StringLiteral(
+								Box::new(
+									StringLiteralData { value: s }
+								)
+							)
+						},
+						_ => panic!() // Should never happen
+					}
+				} else if let Some(integer_literal) = self.accept_any(Token::IntegerLiteral(0)) {
+					match integer_literal {
+						Token::IntegerLiteral(i) => {
+							Expression::IntegerLiteral(
+								Box::new(
+									IntegerLiteralData { value: i }
+								)
+							)
+						},
+						_ => panic!() // Should never happen
+					}
+				} else if let Some(bool_literal) = self.accept_any(Token::BoolLiteral(false)) {
+					match bool_literal {
+						Token::BoolLiteral(b) => {
+							Expression::BoolLiteral(
+								Box::new(
+									BoolLiteralData { value: b }
+								)
+							)
+						},
+						_ => panic!() // Should never happen
+					}
+				} else if let Some(char_literal) = self.accept_any(Token::CharLiteral('\0')) {
+					match char_literal {
+						Token::CharLiteral(c) => {
+							Expression::CharLiteral(
+								Box::new(
+									CharLiteralData { value: c }
+								)
+							)
+						},
+						_ => panic!() // Should never happen
+					}
+				} else if let Some(identifier) = self.accept_any(Token::Identifier("".to_string())) {
+					let mut path: Path = vec![];
+
+					let i = match identifier {
+						Token::Identifier(i) => i,
+						_ => panic!() // Should never happen
+					};
+
+					path.push(
+						Box::new(
+							PathPart::IdentifierPathPart(
+								Box::new(
+									IdentifierPathPartData { identifier: i }
+								)
 							)
 						)
-					)
-				);
-			}
+					);
 
-			if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
-				Expression::FuncCall(self.parse_func_call(path))
-			} else {
-				loop {
-					if self.accept(Token::Symbol(Symbol::Dot)).is_some() {
+					while self.accept(Token::Symbol(Symbol::ColonColon)).is_some() {
 						let next_path_token = self.expect_any(Token::Identifier("".to_string()));
 						let next_path = match next_path_token {
 							Token::Identifier(id) => id,
@@ -504,7 +554,7 @@ impl<'a> Parser<'a> {
 						};
 
 						path.push(
-							Box::new(PathPart::FieldPathPart)
+							Box::new(PathPart::ModulePathPart)
 						);
 
 						path.push(
@@ -516,99 +566,66 @@ impl<'a> Parser<'a> {
 								)
 							)
 						);
-					} else if self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
-						let expr = self.parse_expression();
-						self.expect(Token::Symbol(Symbol::RightBracket));
+					}
 
-						path.push(
-							Box::new(
-								PathPart::IndexPathPart(
-									Box::new(
-										IndexPathPartData { index: Some(expr) }
-									)
-								)
-							)
-						);
+					if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
+						Expression::FuncCall(self.parse_func_call(path))
 					} else {
-						break
-					};
+						loop {
+							if self.accept(Token::Symbol(Symbol::Dot)).is_some() {
+								let next_path_token = self.expect_any(Token::Identifier("".to_string()));
+								let next_path = match next_path_token {
+									Token::Identifier(id) => id,
+									_ => panic!() // Should never happen
+								};
+
+								path.push(
+									Box::new(PathPart::FieldPathPart)
+								);
+
+								path.push(
+									Box::new(
+										PathPart::IdentifierPathPart(
+											Box::new(
+												IdentifierPathPartData { identifier: next_path }
+											)
+										)
+									)
+								);
+							} else if self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
+								let expr = self.parse_expression();
+								self.expect(Token::Symbol(Symbol::RightBracket));
+
+								path.push(
+									Box::new(
+										PathPart::IndexPathPart(
+											Box::new(
+												IndexPathPartData { index: Some(expr) }
+											)
+										)
+									)
+								);
+							} else {
+								break
+							};
+						}
+
+						Expression::Variable(
+							Box::new(
+								VariableData { path: path }
+							)
+						)
+					}
+				} else {
+					panic!("Parser error: unexpected token {:?}, ast: {:#?}", self.current_token, self.ast)
+				};
+
+				if greedy {
+					self.parse_expression_rec(Some(expr), true)
+				} else {
+					expr
 				}
-
-				Expression::Variable(
-					Box::new(
-						VariableData { path: path }
-					)
-				)
-			}
-		} else {
-			panic!("Parser error: unexpected token {:?}, ast: {:#?}", self.current_token, self.ast)
-		};
-
-		if self.accept(Token::Symbol(Symbol::Plus)).is_some() {
-			Expression::Addition(
-				Box::new(
-					expr
-				),
-				Box::new(
-					self.parse_expression()
-				)
-			)
-		} else if self.accept(Token::Symbol(Symbol::Minus)).is_some() {
-			Expression::Substraction(
-				Box::new(
-					expr
-				),
-				Box::new(
-					self.parse_expression()
-				)
-			)
-		} else if self.accept(Token::Symbol(Symbol::Times)).is_some() {
-			Expression::Multiplication(
-				Box::new(
-					expr
-				),
-				Box::new(
-					self.parse_expression()
-				)
-			)
-		} else if self.accept(Token::Symbol(Symbol::Over)).is_some() {
-			Expression::Division(
-				Box::new(
-					expr
-				),
-				Box::new(
-					self.parse_expression()
-				)
-			)
-		} else if self.accept(Token::Symbol(Symbol::Modulo)).is_some() {
-			Expression::Modulo(
-				Box::new(
-					expr
-				),
-				Box::new(
-					self.parse_expression()
-				)
-			)
-		} else if self.accept(Token::Symbol(Symbol::EqualEqual)).is_some() {
-			Expression::Equality(
-				Box::new(
-					expr
-				),
-				Box::new(
-					self.parse_expression()
-				)
-			)
-		} else if self.accept(Token::Symbol(Symbol::NotEqual)).is_some() {
-			Expression::Inequality(
-				Box::new(
-					expr
-				),
-				Box::new(
-					self.parse_expression()
-				)
-			)
-		} else {
-			expr
+			},
 		}
 	}
 
