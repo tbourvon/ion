@@ -4,6 +4,7 @@ use lexer;
 use parser;
 use std::fs::File;
 use std::io::prelude::*;
+use std::io;
 
 pub struct Interpreter<'a> {
 	ast: &'a Ast,
@@ -127,6 +128,8 @@ impl<'a> Interpreter<'a> {
 
 		if is_builtin_func(&func_call_data.path, "println") {
 			self.builtin_println(vars, func_call_data)
+		} else if is_builtin_func(&func_call_data.path, "readln") {
+			self.builtin_readln(vars, func_call_data)
 		} else {
 			let mut module_string = String::new();
 			let mut last_id = String::new();
@@ -432,6 +435,21 @@ impl<'a> Interpreter<'a> {
 		};
 
 		None
+	}
+
+	fn builtin_readln(&self, vars: *mut InterpreterVars, func_call_data: &FuncCallData) -> Option<Value> {
+		if func_call_data.arguments.len() != 0 {
+			panic!("Interpreter error: invalid argument count for readln")
+		};
+
+		let mut line = String::new();
+	    let stdin = io::stdin();
+	    stdin.lock().read_line(&mut line).unwrap();
+    	Some(
+			Value::String(
+				line
+			)
+		)
 	}
 
 	fn default_value(&self, var_type: Type) -> Value {
