@@ -136,7 +136,7 @@ impl<'a> Parser<'a> {
 
 		let mut statements: std::vec::Vec<BlockStatement> = vec![];
 		while self.accept(Token::Symbol(Symbol::RightBrace)).is_none() {
-			statements.push(self.parse_block_statement());
+			statements.push(self.parse_block_statement(return_type.clone()));
 		};
 
 		Box::new(
@@ -195,7 +195,7 @@ impl<'a> Parser<'a> {
 		)
 	}
 
-	fn parse_block_statement(&mut self) -> BlockStatement {
+	fn parse_block_statement(&mut self, return_type: Option<Type>) -> BlockStatement {
 		if self.accept(Token::Keyword(Keyword::Var)).is_some() {
 			BlockStatement::VarDecl(self.parse_var_decl())
 		} else if self.accept(Token::Keyword(Keyword::If)).is_some() {
@@ -203,7 +203,7 @@ impl<'a> Parser<'a> {
 		} else if self.accept(Token::Keyword(Keyword::While)).is_some() {
 			BlockStatement::While(self.parse_while())
 		} else if self.accept(Token::Keyword(Keyword::Return)).is_some() {
-			BlockStatement::Return(self.parse_return())
+			BlockStatement::Return(self.parse_return(return_type))
 		} else if let Some(identifier) = self.accept_any(Token::Identifier("".to_string())) {
 			match identifier {
 				Token::Identifier(i) => {
@@ -303,9 +303,15 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn parse_return(&mut self) -> Box<ReturnData> {
+	fn parse_return(&mut self, return_type: Option<Type>) -> Box<ReturnData> {
 		Box::new(
-			ReturnData { value: self.parse_expression() }
+			ReturnData {
+				value: match return_type {
+					Some(_) => Some(self.parse_expression()),
+					None => None,
+				},
+				expected_type: return_type,
+			}
 		)
 	}
 
@@ -316,7 +322,7 @@ impl<'a> Parser<'a> {
 
 		let mut statements: std::vec::Vec<BlockStatement> = vec![];
 		while self.accept(Token::Symbol(Symbol::RightBrace)).is_none() {
-			statements.push(self.parse_block_statement());
+			statements.push(self.parse_block_statement(None));
 		};
 
 		Box::new(
@@ -334,7 +340,7 @@ impl<'a> Parser<'a> {
 
 		let mut statements: std::vec::Vec<BlockStatement> = vec![];
 		while self.accept(Token::Symbol(Symbol::RightBrace)).is_none() {
-			statements.push(self.parse_block_statement());
+			statements.push(self.parse_block_statement(None));
 		};
 
 		Box::new(
@@ -661,6 +667,25 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_type(&mut self) -> Type {
+		fn get_builtin_type(path: &Path) -> Option<Type> {
+			if path.len() != 1 {
+				None
+			} else {
+				match **path.get(0).unwrap() {
+					PathPart::IdentifierPathPart(ref ipp) => {
+						match ipp.identifier.as_ref() {
+							"int" => Some(Type::IntType),
+							"bool" => Some(Type::BoolType),
+							"char" => Some(Type::CharType),
+							"string" => Some(Type::StringType),
+							_ => None,
+						}
+					},
+					_ => None,
+				}
+			}
+		}
+
 		if self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
 			self.expect(Token::Symbol(Symbol::RightBracket));
 			let inner_type = self.parse_type();
@@ -707,13 +732,14 @@ impl<'a> Parser<'a> {
 			);
 		}
 
-
-
-		Type::StructType(
-			Box::new(
-				StructTypeData { path: path }
+		match get_builtin_type(&path) {
+			Some(t) => t,
+			None => Type::StructType(
+				Box::new(
+					StructTypeData { path: path }
+				)
 			)
-		)
+		}
 	}
 
 	fn skip_newlines(&mut self) {

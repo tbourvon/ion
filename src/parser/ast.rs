@@ -51,7 +51,8 @@ pub enum BlockStatement {
 
 #[derive(Debug, Clone)]
 pub struct ReturnData {
-	pub value: Expression,
+	pub value: Option<Expression>,
+	pub expected_type: Option<Type>,
 }
 
 #[derive(Debug, Clone)]

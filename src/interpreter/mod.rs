@@ -24,7 +24,6 @@ pub struct Variable {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-	_Empty,
 	String(String),
 	Integer(i64),
 	Bool(bool),
@@ -95,7 +94,6 @@ impl<'a> Interpreter<'a> {
 			Value::String(_) => Type::StringType,
 			Value::Integer(_) => Type::IntType,
 			Value::Struct(t, _) => t,
-			Value::_Empty => panic!()
 		}
 	}
 
@@ -129,7 +127,28 @@ impl<'a> Interpreter<'a> {
 	}
 
 	fn execute_return(&self, vars: *mut InterpreterVars, return_data: &ReturnData) -> Option<Value> {
-		Some(self.value_from_expression(vars, &return_data.value))
+		match return_data.expected_type {
+			Some(ref t) => {
+				let value = match return_data.value {
+					Some(ref e) => self.value_from_expression(vars, e),
+					None => panic!("Interpreter error: expected expression for return statement"),
+				};
+
+				let value_type = Self::type_from_value(value.clone());
+				if value_type != *t {
+					panic!("Interpreter error: mismatched types in return statement (got {:?} expected {:?})", value_type, *t)
+				}
+
+				Some(value)
+			},
+			None => {
+				if let Some(_) = return_data.value {
+					panic!("Interpreter error: unexpected expression in return statement")
+				}
+
+				None
+			}
+		}
 	}
 
 	fn execute_func_call(&self, vars: *mut InterpreterVars, func_call_data: &FuncCallData) -> Option<Value> {
@@ -190,10 +209,26 @@ impl<'a> Interpreter<'a> {
 					var_type: param.param_type.clone(),
 					value: {
 						if param_count < func_call_data.arguments.len() {
-							self.value_from_expression(vars, &func_call_data.arguments.get(param_count).unwrap().value)
+							let value = self.value_from_expression(vars, &func_call_data.arguments.get(param_count).unwrap().value);
+
+							let value_type = Self::type_from_value(value.clone());
+
+							if value_type != param.param_type {
+								panic!("Interpreter error: mismatched types in function call (got {:?} expected {:?})", value_type, param.param_type)
+							} else {
+								value
+							}
 						} else {
 							if let Some(ref e) = param.default_value {
-								self.value_from_expression(vars, e)
+								let value = self.value_from_expression(vars, e);
+
+								let value_type = Self::type_from_value(value.clone());
+
+								if value_type != param.param_type {
+									panic!("Interpreter error: mismatched types in function declaration default value (got {:?} expected {:?})", value_type, param.param_type)
+								} else {
+									value
+								}
 							} else {
 								panic!("Interpreter error: expected argument for {:?}", param.name)
 							}
@@ -244,7 +279,15 @@ impl<'a> Interpreter<'a> {
 				Variable {
 					name: var_decl_data.name.clone(),
 					var_type: var_decl_data.var_type.clone(),
-					value: value,
+					value: {
+						let value_type = Self::type_from_value(value.clone());
+
+						if value_type != var_decl_data.var_type {
+							panic!("Interpreter error: mismatched types in var initialization (got {:?} expected {:?})", value_type, var_decl_data.var_type)
+						} else {
+							value
+						}
+					},
 				}
 			);
 		}
@@ -282,7 +325,9 @@ impl<'a> Interpreter<'a> {
 							match index_value {
 								Value::Integer(i) => {
 									let cell = match *{current_ref} {
-										Value::Array(_, ref mut a) => a.get_mut(i as usize).unwrap(),
+										Value::Array(_, ref mut a) => {
+											a.get_mut(i as usize).unwrap()
+										},
 										_ => panic!("Interpreter error: can't access index on non-array")
 									};
 
@@ -293,8 +338,14 @@ impl<'a> Interpreter<'a> {
 						},
 						None => {
 							let new_cell = match *{current_ref} {
-								Value::Array(_, ref mut a) => {
-									a.push(Value::_Empty);
+								Value::Array(ref t, ref mut a) => {
+									a.push(
+										match *t {
+											Some(ref array_type) => self.default_value((*array_type).clone()),
+											None => panic!("Interpreter error: cannot push to untyped array"),
+										}
+									);
+
 									let last_index = a.len() - 1;
 									a.get_mut(last_index).unwrap()
 								},
@@ -311,7 +362,14 @@ impl<'a> Interpreter<'a> {
 			}
 		};
 
-		*current_ref = value;
+		let value_type = Self::type_from_value(value.clone());
+		let current_type = Self::type_from_value((*current_ref).clone());
+
+		if value_type != current_type {
+			panic!("Interpreter error: mismatched types in var assignment (got {:?} expected {:?})", value_type, current_type)
+		} else {
+			*current_ref = value;
+		};
 	}
 
 	fn execute_if(&self, vars: *mut InterpreterVars, if_data: &'a IfData) {
@@ -537,7 +595,7 @@ impl<'a> Interpreter<'a> {
 			Value::Char(c) => println!("{}", c),
 			Value::Struct(_, s) => println!("{:?}", s),
 			Value::Array(_, a) => println!("{:?}", a),
-			other => panic!("Interpreter error: invalid argument type for println (got {:?})", other)
+			/*other => panic!("Interpreter error: invalid argument type for println (got {:?})", other)*/
 		};
 
 		None
