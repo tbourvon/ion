@@ -72,7 +72,7 @@ pub struct VarAssignmentData {
 	pub value: Expression,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FuncCallData {
 	pub path: Path,
 	pub arguments: std::vec::Vec<Box<FuncCallArgData>>,
@@ -85,7 +85,7 @@ pub struct VarDeclData {
 	pub value: Option<Expression>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FuncCallArgData {
 	pub value: Expression,
 }
@@ -97,7 +97,20 @@ pub struct FuncDeclParamData {
 	pub default_value: Option<Expression>,
 }
 
-pub type Type = String;
+#[derive(Debug, Clone, PartialEq)]
+pub enum Type {
+	ArrayType(Box<Type>),
+	StructType(Box<StructTypeData>),
+	StringType,
+	IntType,
+	BoolType,
+	CharType,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructTypeData {
+	pub path: Path,
+}
 
 #[derive(Debug, Clone)]
 pub struct StructDeclData {
@@ -112,7 +125,7 @@ pub struct StructFieldData {
 	pub default_value: Option<Expression>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
 	StringLiteral(Box<StringLiteralData>),
 	IntegerLiteral(Box<IntegerLiteralData>),
@@ -132,19 +145,19 @@ pub enum Expression {
 	Count(Box<Expression>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ArrayData {
 	pub items: std::vec::Vec<Expression>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VariableData {
 	pub path: Path,
 }
 
 pub type Path = std::vec::Vec<Box<PathPart>>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PathPart { // TODO: rework with recursive data structures... The problem right now is that we read from left to right, but recursive data structures would imply right to left construction.
 	ModulePathPart,
 	FieldPathPart,
@@ -152,32 +165,32 @@ pub enum PathPart { // TODO: rework with recursive data structures... The proble
 	IdentifierPathPart(Box<IdentifierPathPartData>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IndexPathPartData {
 	pub index: Option<Expression>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IdentifierPathPartData {
 	pub identifier: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StringLiteralData {
 	pub value: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IntegerLiteralData {
 	pub value: i64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BoolLiteralData {
 	pub value: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CharLiteralData {
 	pub value: char,
 }

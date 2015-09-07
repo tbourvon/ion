@@ -8,12 +8,12 @@ use std::io;
 
 pub struct Interpreter<'a> {
 	ast: &'a Ast,
-	funcs: std::collections::HashMap<String, FuncDeclData>,
-	structs: std::collections::HashMap<String, StructDeclData>,
-	imports: std::collections::HashMap<String, Box<Ast>>,
+	funcs: std::collections::HashMap<String, FuncDeclData>, // TODO: Bloody get rid of Strings for indexing... preferably Path indexing would be best
+	structs: std::collections::HashMap<String, StructDeclData>, // TODO: Bloody get rid of Strings for indexing... preferably Path indexing would be best
+	imports: std::collections::HashMap<String, Box<Ast>>, // TODO: Bloody get rid of Strings for indexing... preferably Path indexing would be best
 }
 
-type InterpreterVars = std::collections::HashMap<String, Variable>;
+type InterpreterVars = std::collections::HashMap<String, Variable>; // TODO: Bloody get rid of Strings for indexing... preferably Path indexing would be best
 
 #[derive(Debug)]
 pub struct Variable {
@@ -29,8 +29,8 @@ pub enum Value {
 	Integer(i64),
 	Bool(bool),
 	Char(char),
-	Struct(std::collections::HashMap<String, Box<Value>>),
-	Array(Type, std::vec::Vec<Value>),
+	Struct(Type, std::collections::HashMap<String, Box<Value>>),
+	Array(Option<Type>, std::vec::Vec<Value>),
 }
 
 impl<'a> Interpreter<'a> {
@@ -82,7 +82,24 @@ impl<'a> Interpreter<'a> {
 		self.execute_func_call(&mut vars, &main_func_call);
 	}
 
-	fn execute_import(&mut self, import_data: &ImportData) {
+	fn type_from_value(value: Value) -> Type {
+		match value {
+			Value::Array(t, _) => match t {
+				Some(array_type) => Type::ArrayType(
+					Box::new(array_type)
+				),
+				None => panic!("Interpreter error: cannot deduce type for empty array")
+			},
+			Value::Bool(_) => Type::BoolType,
+			Value::Char(_) => Type::CharType,
+			Value::String(_) => Type::StringType,
+			Value::Integer(_) => Type::IntType,
+			Value::Struct(t, _) => t,
+			Value::_Empty => panic!()
+		}
+	}
+
+	fn execute_import(&mut self, import_data: &ImportData) { // TODO: rework that for more safety and non-naive handling
 		let path_string = import_data.path.clone() + ".ion";
 	    let path = std::path::Path::new(AsRef::<str>::as_ref(&path_string[..]));
 	    let mut file = match File::open(&path) {
@@ -250,7 +267,7 @@ impl<'a> Interpreter<'a> {
 				PathPart::FieldPathPart if !is_field => is_field = true,
 				PathPart::IdentifierPathPart(ref ipp) if is_field => {
 					let current_map = match *{current_ref} {
-						Value::Struct(ref mut map) => map,
+						Value::Struct(_, ref mut map) => map,
 						_ => panic!("Interpreter error: cannot access field on non-struct")
 					};
 
@@ -348,7 +365,7 @@ impl<'a> Interpreter<'a> {
 						PathPart::FieldPathPart if !is_field => is_field = true,
 						PathPart::IdentifierPathPart(ref ipp) if is_field => {
 							let current_map = match *{current_ref} {
-								Value::Struct(ref map) => map,
+								Value::Struct(_, ref map) => map,
 								_ => panic!("Interpreter error: cannot access field on non-struct")
 							};
 
@@ -386,11 +403,21 @@ impl<'a> Interpreter<'a> {
 			},
 			Expression::Array(ref a) => {
 				let mut values: std::vec::Vec<Value> = vec![];
+				let mut array_type: Option<Type> = None;
 				for item in &a.items {
-					values.push(self.value_from_expression(vars, item))
+					let value = self.value_from_expression(vars, item);
+					let value_type = Self::type_from_value(value.clone());
+					match array_type {
+						Some(ref t) => if value_type != *t {
+							panic!("Interpreter error: heterogeneous types in array literal")
+						},
+						None => array_type = Some(value_type),
+					};
+
+					values.push(value)
 				}
 
-				Value::Array("".to_string(), values)
+				Value::Array(array_type, values)
 			},
 			Expression::FuncCall(ref fc) => {
 				self.execute_func_call(vars, fc).unwrap()
@@ -508,7 +535,7 @@ impl<'a> Interpreter<'a> {
 			Value::Integer(i) => println!("{}", i),
 			Value::Bool(b) => println!("{}", b),
 			Value::Char(c) => println!("{}", c),
-			Value::Struct(s) => println!("{:?}", s),
+			Value::Struct(_, s) => println!("{:?}", s),
 			Value::Array(_, a) => println!("{:?}", a),
 			other => panic!("Interpreter error: invalid argument type for println (got {:?})", other)
 		};
@@ -532,34 +559,54 @@ impl<'a> Interpreter<'a> {
 	}
 
 	fn default_value(&self, var_type: Type) -> Value {
-		let mut chars = var_type.chars();
-		while let Some(c1) = chars.next() {
-			if c1 == '[' {
-				if let Some(c2) = chars.next() {
-					if c2.is_numeric() || c2 == ']' {
-						return Value::Array(var_type.split("]").nth(1).unwrap().to_string(), vec![])
-					} else {
-						panic!("Interpreter error: incorrect type")
+		match var_type {
+			Type::StringType => Value::String("".to_string()),
+			Type::IntType => Value::Integer(0),
+			Type::BoolType => Value::Bool(false),
+			Type::CharType => Value::Char('\0'),
+			Type::ArrayType(t) => Value::Array(Some(*t), vec![]),
+			Type::StructType(ref s) => {
+				let mut module_string = String::new();
+				let mut last_id = String::new();
+				for path_part in &s.path {
+					match **path_part {
+						PathPart::IdentifierPathPart(ref ipp) => {
+							if last_id != "" {
+								module_string.push_str(last_id.as_ref());
+							};
+							last_id = ipp.identifier.clone();
+						},
+						PathPart::ModulePathPart => {
+							module_string.push_str("::");
+						},
+						_ => panic!("Interpreter error: invalid function path")
 					}
-				}
-			} else {
-				break
-			}
-		}
+				};
 
-		match var_type.as_ref() {
-			"string" => Value::String("".to_string()),
-			"int" => Value::Integer(0),
-			"bool" => Value::Bool(false),
-			"char" => Value::Char('\0'),
-			_ => {
+				let struct_decl = if module_string == "" {
+					self.structs.get(&last_id).unwrap()
+				} else {
+					let mut import_struct_decl: Option<&StructDeclData> = None;
+					for statement in &self.imports.get(&module_string).unwrap().statements {
+						match *statement {
+							Statement::StructDecl(ref sd) => {
+								import_struct_decl = Some(sd);
+								break
+							},
+							_ => (),
+						}
+					}
+
+					import_struct_decl.unwrap()
+				};
+
 				let mut fields: std::collections::HashMap<String, Box<Value>> = std::collections::HashMap::new();
 
-				for field in &self.structs.get(&var_type).unwrap().fields {
+				for field in &struct_decl.fields {
 					fields.insert(field.name.clone(), Box::new(self.default_value(field.field_type.clone())));
 				}
 
-				Value::Struct(fields)
+				Value::Struct(var_type.clone(), fields)
 			},
 		}
 	}

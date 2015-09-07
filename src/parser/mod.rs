@@ -412,7 +412,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::Plus)))
+							self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Plus)))
 						)
 					)
 				} else if self.accept(Token::Symbol(Symbol::Minus)).is_some() {
@@ -421,7 +421,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::Minus)))
+							self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Minus)))
 						)
 					)
 				} else if self.accept(Token::Symbol(Symbol::Times)).is_some() {
@@ -430,7 +430,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::Times)))
+							self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Times)))
 						)
 					)
 				} else if self.accept(Token::Symbol(Symbol::Over)).is_some() {
@@ -439,7 +439,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::Over)))
+							self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Over)))
 						)
 					)
 				} else if self.accept(Token::Symbol(Symbol::Modulo)).is_some() {
@@ -448,7 +448,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::Modulo)))
+							self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Modulo)))
 						)
 					)
 				} else if self.accept(Token::Symbol(Symbol::EqualEqual)).is_some() {
@@ -457,7 +457,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::EqualEqual)))
+							self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::EqualEqual)))
 						)
 					)
 				} else if self.accept(Token::Symbol(Symbol::NotEqual)).is_some() {
@@ -466,7 +466,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::NotEqual)))
+							self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::NotEqual)))
 						)
 					)
 				} else if self.accept(Token::Symbol(Symbol::Concat)).is_some() {
@@ -475,7 +475,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::Concat)))
+							self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Concat)))
 						)
 					)
 				} else {
@@ -648,7 +648,7 @@ impl<'a> Parser<'a> {
 			},
 		};
 
-		if Parser::precedence_for_token(self.current_token.clone()) > minimum_precedence {
+		if Self::precedence_for_token(self.current_token.clone()) > minimum_precedence {
 			self.parse_expression_rec(Some(new_expr), minimum_precedence)
 		} else {
 			new_expr
@@ -656,28 +656,59 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_type(&mut self) -> Type {
-		let mut type_string: Type = String::new();
-		while self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
-			type_string.push_str("[");
-
-			if let Some(il) = self.accept_any(Token::IntegerLiteral(0)) {
-				match il {
-					Token::IntegerLiteral(i) => type_string.push_str(&i.to_string()),
-					_ => panic!() // Should never happen
-				}
-			}
-
+		if self.accept(Token::Symbol(Symbol::LeftBracket)).is_some() {
 			self.expect(Token::Symbol(Symbol::RightBracket));
-			type_string.push_str("]")
-		}
+			let inner_type = self.parse_type();
 
+			return Type::ArrayType(
+				Box::new(inner_type)
+			)
+		};
+
+		let mut path: Path = vec![];
 		let type_token = self.expect_any(Token::Identifier("".to_string()));
-		let type_name = match type_token {
-			Token::Identifier(i) => i,
+		match type_token {
+			Token::Identifier(i) => path.push(
+				Box::new(
+					PathPart::IdentifierPathPart(
+						Box::new(
+							IdentifierPathPartData { identifier: i }
+						)
+					)
+				)
+			),
 			_ => panic!() // Should never happen
 		};
 
-		type_string + &type_name
+		while self.accept(Token::Symbol(Symbol::ColonColon)).is_some() {
+			let next_path_token = self.expect_any(Token::Identifier("".to_string()));
+			let next_path = match next_path_token {
+				Token::Identifier(id) => id,
+				_ => panic!() // Should never happen
+			};
+
+			path.push(
+				Box::new(PathPart::ModulePathPart)
+			);
+
+			path.push(
+				Box::new(
+					PathPart::IdentifierPathPart(
+						Box::new(
+							IdentifierPathPartData { identifier: next_path }
+						)
+					)
+				)
+			);
+		}
+
+
+
+		Type::StructType(
+			Box::new(
+				StructTypeData { path: path }
+			)
+		)
 	}
 
 	fn skip_newlines(&mut self) {
