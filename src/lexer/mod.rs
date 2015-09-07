@@ -40,6 +40,7 @@ pub enum Symbol {
     More,
     MoreOrEqual,
     Concat,
+    Return,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -235,7 +236,15 @@ impl<'a> Reader<'a> {
                     _ => Ok(Token::Symbol(Symbol::Plus)),
                 }
             },
-            '-' => Ok(Token::Symbol(Symbol::Minus)),
+            '-' => {
+                match self.peek_char().unwrap() {
+                    '>' => {
+                        self.next_char();
+                        Ok(Token::Symbol(Symbol::Return))
+                    },
+                    _ => Ok(Token::Symbol(Symbol::Minus)),
+                }
+            },
             '*' => Ok(Token::Symbol(Symbol::Times)),
             '/' => Ok(Token::Symbol(Symbol::Over)),
             '%' => Ok(Token::Symbol(Symbol::Modulo)),

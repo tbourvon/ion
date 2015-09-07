@@ -127,6 +127,11 @@ impl<'a> Parser<'a> {
 			};
 		};
 
+		let mut return_type: Option<Type> = None;
+		if self.accept(Token::Symbol(Symbol::Return)).is_some() {
+			return_type = Some(self.parse_type());
+		}
+
 		self.expect(Token::Symbol(Symbol::LeftBrace));
 
 		let mut statements: std::vec::Vec<BlockStatement> = vec![];
@@ -137,7 +142,7 @@ impl<'a> Parser<'a> {
 		Box::new(
 			FuncDeclData {
 				name: name,
-				return_type: None,
+				return_type: return_type,
 				parameters: params,
 				statements: statements,
 			}
