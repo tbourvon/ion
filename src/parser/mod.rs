@@ -607,6 +607,8 @@ impl<'a> Parser<'a> {
 
 					if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
 						Expression::FuncCall(self.parse_func_call(path))
+					} else if self.accept(Token::Symbol(Symbol::LeftBrace)).is_some() {
+						Expression::StructInit(self.parse_struct_init(path))
 					} else {
 						loop {
 							if self.accept(Token::Symbol(Symbol::Dot)).is_some() {
@@ -664,6 +666,43 @@ impl<'a> Parser<'a> {
 		} else {
 			new_expr
 		}
+	}
+
+	fn parse_struct_init(&mut self, path: Path) -> Box<StructInitData> {
+		let mut fields: std::vec::Vec<Box<StructInitFieldData>> = vec![];
+		while self.accept(Token::Symbol(Symbol::RightBrace)).is_none() {
+			let field_name_token = self.expect_any(Token::Identifier("".to_string()));
+			let field_name = match field_name_token {
+				Token::Identifier(s) => s,
+				_ => panic!(), // Should never happen
+			};
+
+			self.expect(Token::Symbol(Symbol::Colon));
+
+			let field_value = self.parse_expression();
+
+			fields.push(
+				Box::new(
+					StructInitFieldData {
+						name: field_name,
+						value: field_value,
+					}
+				)
+			);
+
+			if self.current_token == Token::Symbol(Symbol::RightBrace) {
+				self.accept(Token::Symbol(Symbol::Comma));
+			} else {
+				self.expect(Token::Symbol(Symbol::Comma));
+			};
+		};
+
+		Box::new(
+			StructInitData {
+				path: path,
+				fields: fields,
+			}
+		)
 	}
 
 	fn parse_type(&mut self) -> Type {

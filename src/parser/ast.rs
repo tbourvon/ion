@@ -133,6 +133,7 @@ pub enum Expression {
 	BoolLiteral(Box<BoolLiteralData>),
 	CharLiteral(Box<CharLiteralData>),
 	Variable(Box<VariableData>),
+	StructInit(Box<StructInitData>),
 	Array(Box<ArrayData>),
 	FuncCall(Box<FuncCallData>),
 	Addition(Box<Expression>, Box<Expression>),
@@ -144,6 +145,18 @@ pub enum Expression {
 	Inequality(Box<Expression>, Box<Expression>),
 	Concatenation(Box<Expression>, Box<Expression>),
 	Count(Box<Expression>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructInitData {
+	pub path: Path,
+	pub fields: std::vec::Vec<Box<StructInitFieldData>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructInitFieldData {
+	pub name: String,
+	pub value: Expression,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -477,6 +477,89 @@ impl<'a> Interpreter<'a> {
 
 				Value::Array(array_type, values)
 			},
+			Expression::StructInit(ref si) => {
+				let mut module_string = String::new();
+				let mut last_id = String::new();
+				for path_part in &si.path {
+					match **path_part {
+						PathPart::IdentifierPathPart(ref ipp) => {
+							if last_id != "" {
+								module_string.push_str(last_id.as_ref());
+							};
+							last_id = ipp.identifier.clone();
+						},
+						PathPart::ModulePathPart => {
+							module_string.push_str("::");
+						},
+						_ => panic!("Interpreter error: invalid function path")
+					}
+				};
+
+				let struct_decl = if module_string == "" {
+					self.structs.get(&last_id).unwrap()
+				} else {
+					let mut import_struct_decl: Option<&StructDeclData> = None;
+					for statement in &self.imports.get(&module_string).unwrap().statements {
+						match *statement {
+							Statement::StructDecl(ref sd) => {
+								import_struct_decl = Some(sd);
+								break
+							},
+							_ => (),
+						}
+					}
+
+					import_struct_decl.unwrap()
+				};
+
+				let mut new_content: std::collections::HashMap<String, Box<Value>> = std::collections::HashMap::new();
+
+				for new_field in &si.fields {
+					let mut found_field = false;
+
+					for field in &struct_decl.fields {
+						if field.name == new_field.name {
+							found_field = true;
+						}
+					}
+
+					if !found_field {
+						panic!("Interpreter error: unknown field {:?} in struct init", new_field.name)
+					}
+				}
+
+				for field in &struct_decl.fields {
+					let mut found_field = false;
+
+					for new_field in &si.fields {
+						if field.name == new_field.name {
+							let value = self.value_from_expression(vars, &new_field.value);
+							let value_type = Self::type_from_value(value.clone());
+
+							if field.field_type != value_type {
+								panic!("Interpreter error: mismatched types in struct init (got {:?} expected {:?})", value_type, field.field_type)
+							} else {
+								new_content.insert(field.name.clone(), Box::new(value));
+							};
+
+							found_field = true;
+						}
+					}
+
+					if !found_field {
+						panic!("Interpreter error: missing field {:?} in struct init", field.name)
+					}
+				}
+
+				Value::Struct(
+					Type::StructType(
+						Box::new(
+							StructTypeData { path: si.path.clone() }
+						)
+					),
+					new_content,
+				)
+			}
 			Expression::FuncCall(ref fc) => {
 				self.execute_func_call(vars, fc).unwrap()
 			},
