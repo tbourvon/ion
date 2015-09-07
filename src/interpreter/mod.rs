@@ -479,6 +479,22 @@ impl<'a> Interpreter<'a> {
 
 				Value::Bool(value1 != value2)
 			},
+			Expression::Concatenation(ref e1, ref e2) => {
+				let string1 = match self.value_from_expression(vars, e1) {
+					Value::String(s) => s,
+					other => panic!("Interpreter error: incorrect expression for concatenation: {:?}", other)
+				};
+
+				let string2 = match self.value_from_expression(vars, e2) {
+					Value::String(s) => s,
+					other => panic!("Interpreter error: incorrect expression for concatenation: {:?}", other)
+				};
+
+				let mut new_string = String::new();
+				new_string.push_str(string1.as_ref());
+				new_string.push_str(string2.as_ref());
+				Value::String(new_string)
+			},
 		}
 	}
 

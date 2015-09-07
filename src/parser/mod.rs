@@ -32,6 +32,25 @@ impl<'a> Parser<'a> {
 		&self.ast
 	}
 
+	fn precedence_for_token(token: Token) -> u8 {
+		match token {
+			Token::Symbol(s) => {
+				match s {
+					Symbol::EqualEqual |
+					Symbol::NotEqual => 1,
+					Symbol::Plus |
+					Symbol::Minus |
+					Symbol::Concat => 2,
+					Symbol::Times |
+					Symbol::Over |
+					Symbol::Modulo => 3,
+					_ => 0
+				}
+			},
+			_ => 0
+		}
+	}
+
 	fn parse_statement(&mut self) -> Statement {
 		if self.accept(Token::Keyword(Keyword::Import)).is_some() {
 			Statement::Import(self.parse_import())
@@ -381,19 +400,19 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_expression(&mut self) -> Expression {
-		self.parse_expression_rec(None, true)
+		self.parse_expression_rec(None, 0)
 	}
 
-	fn parse_expression_rec(&mut self, prev_expr: Option<Expression>, greedy: bool) -> Expression {
-		match prev_expr {
+	fn parse_expression_rec(&mut self, prev_expr: Option<Expression>, minimum_precedence: u8) -> Expression {
+		let new_expr = match prev_expr {
 			Some(expr) => {
-				let new_expr = if self.accept(Token::Symbol(Symbol::Plus)).is_some() {
+				if self.accept(Token::Symbol(Symbol::Plus)).is_some() {
 					Expression::Addition(
 						Box::new(
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, false)
+							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::Plus)))
 						)
 					)
 				} else if self.accept(Token::Symbol(Symbol::Minus)).is_some() {
@@ -402,7 +421,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, false)
+							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::Minus)))
 						)
 					)
 				} else if self.accept(Token::Symbol(Symbol::Times)).is_some() {
@@ -411,7 +430,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, false)
+							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::Times)))
 						)
 					)
 				} else if self.accept(Token::Symbol(Symbol::Over)).is_some() {
@@ -420,7 +439,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, false)
+							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::Over)))
 						)
 					)
 				} else if self.accept(Token::Symbol(Symbol::Modulo)).is_some() {
@@ -429,7 +448,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, false)
+							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::Modulo)))
 						)
 					)
 				} else if self.accept(Token::Symbol(Symbol::EqualEqual)).is_some() {
@@ -438,7 +457,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, false)
+							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::EqualEqual)))
 						)
 					)
 				} else if self.accept(Token::Symbol(Symbol::NotEqual)).is_some() {
@@ -447,18 +466,25 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							self.parse_expression_rec(None, false)
+							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::NotEqual)))
+						)
+					)
+				} else if self.accept(Token::Symbol(Symbol::Concat)).is_some() {
+					Expression::Concatenation(
+						Box::new(
+							expr
+						),
+						Box::new(
+							self.parse_expression_rec(None, Parser::precedence_for_token(Token::Symbol(Symbol::Concat)))
 						)
 					)
 				} else {
 					return expr
-				};
-
-				self.parse_expression_rec(Some(new_expr), true)
+				}
 			},
 			None => {
-				let expr = if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
-					let e = self.parse_expression_rec(None, true);
+				if self.accept(Token::Symbol(Symbol::LeftParenthesis)).is_some() {
+					let e = self.parse_expression();
 					self.expect(Token::Symbol(Symbol::RightParenthesis));
 
 					e
@@ -618,14 +644,14 @@ impl<'a> Parser<'a> {
 					}
 				} else {
 					panic!("Parser error: unexpected token {:?}, ast: {:#?}", self.current_token, self.ast)
-				};
-
-				if greedy {
-					self.parse_expression_rec(Some(expr), true)
-				} else {
-					expr
 				}
 			},
+		};
+
+		if Parser::precedence_for_token(self.current_token.clone()) > minimum_precedence {
+			self.parse_expression_rec(Some(new_expr), minimum_precedence)
+		} else {
+			new_expr
 		}
 	}
 

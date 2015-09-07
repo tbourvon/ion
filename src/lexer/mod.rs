@@ -27,6 +27,7 @@ pub enum Symbol {
     Equal,
     EqualEqual,
     Plus,
+    PlusPlus,
     Minus,
     Times,
     Over,
@@ -34,6 +35,11 @@ pub enum Symbol {
     NotEqual,
     ColonColon,
     Hash,
+    Less,
+    LessOrEqual,
+    More,
+    MoreOrEqual,
+    Concat,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -220,7 +226,15 @@ impl<'a> Reader<'a> {
                     _ => Ok(Token::Symbol(Symbol::Equal)),
                 }
             },
-            '+' => Ok(Token::Symbol(Symbol::Plus)),
+            '+' => {
+                match self.peek_char().unwrap() {
+                    '+' => {
+                        self.next_char();
+                        Ok(Token::Symbol(Symbol::PlusPlus))
+                    },
+                    _ => Ok(Token::Symbol(Symbol::Plus)),
+                }
+            },
             '-' => Ok(Token::Symbol(Symbol::Minus)),
             '*' => Ok(Token::Symbol(Symbol::Times)),
             '/' => Ok(Token::Symbol(Symbol::Over)),
@@ -235,6 +249,28 @@ impl<'a> Reader<'a> {
                 }
             },
             '#' => Ok(Token::Symbol(Symbol::Hash)),
+            '<' => {
+                match self.peek_char().unwrap() {
+                    '=' => {
+                        self.next_char();
+                        Ok(Token::Symbol(Symbol::LessOrEqual))
+                    },
+                    '>' => {
+                        self.next_char();
+                        Ok(Token::Symbol(Symbol::Concat))
+                    }
+                    _ => Ok(Token::Symbol(Symbol::Less)),
+                }
+            },
+            '>' => {
+                match self.peek_char().unwrap() {
+                    '=' => {
+                        self.next_char();
+                        Ok(Token::Symbol(Symbol::MoreOrEqual))
+                    },
+                    _ => Ok(Token::Symbol(Symbol::More))
+                }
+            },
             _ => Err("Lexer error: failed to parse symbol"),
         };
 
