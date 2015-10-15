@@ -22,12 +22,23 @@ fn main() {
     };
 
     let mut s = String::new();
-    file.read_to_string(&mut s);
+    let res = file.read_to_string(&mut s);
+    if let Some(err) = res.err() {
+        panic!(err)
+    }
+
     let mut reader = lexer::Reader::new(s.as_ref());
 
     let mut parser = parser::Parser::new(&mut reader);
-    let ast = parser.parse();
+    let ast_res = parser.parse();
+    if let Some(err) = ast_res.clone().err() {
+        panic!(err)
+    }
+    let ast = ast_res.ok().unwrap();
 
     let mut interpreter = interpreter::Interpreter::new(ast);
-    interpreter.execute();
+    let res2 = interpreter.execute();
+    if let Some(err) = res2.err() {
+        panic!(err)
+    }
 }

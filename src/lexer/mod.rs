@@ -74,7 +74,7 @@ impl<'a> Reader<'a> {
         reader
     }
 
-    pub fn next_token(&mut self) -> Result<Token, &'static str> {
+    pub fn next_token(&mut self) -> Result<Token, String> {
         self.skip_whitespace();
 
         match self.current_char {
@@ -95,7 +95,7 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn read_word(&mut self) -> Result<Token, &'static str> {
+    fn read_word(&mut self) -> Result<Token, String> {
         let mut word = String::new();
 
         while let Some(c) = self.current_char {
@@ -123,7 +123,7 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn read_number(&mut self) -> Result<Token, &'static str> {
+    fn read_number(&mut self) -> Result<Token, String> {
         let mut float = false;
         let mut number = String::new();
 
@@ -132,7 +132,7 @@ impl<'a> Reader<'a> {
                 number.push(c);
             } else if c == '.' {
                 if float {
-                    panic!("Lexer error: unexpected '.'");
+                    return Err("Lexer error: unexpected '.'".to_string());
                 } else {
                     float = true;
                     number.push(c);
@@ -145,16 +145,24 @@ impl<'a> Reader<'a> {
         };
 
         if float {
-            Ok(Token::FloatLiteral(number.parse::<f64>().ok().expect("Lexer error: failed to parse float")))
+            if let Some(f) = number.parse::<f64>().ok() {
+                Ok(Token::FloatLiteral(f))
+            } else {
+                Err("Lexer error: failed to parse float".to_string())
+            }
         } else {
-            Ok(Token::IntegerLiteral(number.parse::<i64>().ok().expect("Lexer error: failed to parse integer")))
+            if let Some(i) = number.parse::<i64>().ok() {
+                Ok(Token::IntegerLiteral(i))
+            } else {
+                Err("Lexer error: failed to parse integer".to_string())
+            }
         }
     }
 
-    fn read_char(&mut self) -> Result<Token, &'static str> {
+    fn read_char(&mut self) -> Result<Token, String> {
         let mut c = match self.next_char() {
             Some(c) => c,
-            None => return Err("Lexer error: failed to parse char"),
+            None => return Err("Lexer error: failed to parse char".to_string()),
         };
 
         if c == '\\' { // TODO: make escaping more accurate and complete
@@ -166,14 +174,14 @@ impl<'a> Reader<'a> {
                 self.next_char();
                 Ok(Token::CharLiteral(c))
             } else {
-                panic!("Lexer error: failed to parse char")
+                Err("Lexer error: failed to parse char".to_string())
             }
         } else {
-            panic!("Lexer error: failed to parse char")
+            Err("Lexer error: failed to parse char".to_string())
         }
     }
 
-    fn read_string(&mut self) -> Result<Token, &'static str> {
+    fn read_string(&mut self) -> Result<Token, String> {
         let mut string = String::new();
 
         let mut escaped = false;
@@ -194,11 +202,11 @@ impl<'a> Reader<'a> {
         if closed {
             Ok(Token::StringLiteral(string))
         } else {
-            Err("Lexer error: failed to parse string")
+            Err("Lexer error: failed to parse string".to_string())
         }
     }
 
-    fn read_symbol(&mut self) -> Result<Token, &'static str> {
+    fn read_symbol(&mut self) -> Result<Token, String> {
         let tok = match self.current_char.unwrap() {
             '(' => Ok(Token::Symbol(Symbol::LeftParenthesis)),
             ')' => Ok(Token::Symbol(Symbol::RightParenthesis)),
@@ -254,7 +262,7 @@ impl<'a> Reader<'a> {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::NotEqual))
                     },
-                    _ => Err("Lexer error: failed to parse symbol")
+                    _ => Err("Lexer error: failed to parse symbol".to_string())
                 }
             },
             '#' => Ok(Token::Symbol(Symbol::Hash)),
@@ -280,7 +288,7 @@ impl<'a> Reader<'a> {
                     _ => Ok(Token::Symbol(Symbol::More))
                 }
             },
-            _ => Err("Lexer error: failed to parse symbol"),
+            _ => Err("Lexer error: failed to parse symbol".to_string()),
         };
 
         self.next_char();
