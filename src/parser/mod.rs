@@ -350,15 +350,31 @@ impl<'a> Parser<'a> {
 
 		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
 
-		let mut statements: std::vec::Vec<BlockStatement> = vec![];
+		let mut if_statements: std::vec::Vec<BlockStatement> = vec![];
 		while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
-			statements.push(try!(self.parse_block_statement(None)));
+			if_statements.push(try!(self.parse_block_statement(None)));
 		};
+
+		let mut else_statements_opt: Option<std::vec::Vec<BlockStatement>> = None;
+		if try!(self.accept(Token::Keyword(Keyword::Else))).is_some() {
+			let mut else_statements: std::vec::Vec<BlockStatement> = vec![];
+			if try!(self.accept(Token::Keyword(Keyword::If))).is_some() {
+				else_statements.push(BlockStatement::If(try!(self.parse_if())));
+			} else {
+				try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
+				while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
+					else_statements.push(try!(self.parse_block_statement(None)));
+				};
+			}
+
+			else_statements_opt = Some(else_statements);
+		}
 
 		Ok(Box::new(
 			IfData {
 				condition: condition,
-				statements: statements,
+				if_statements: if_statements,
+				else_statements: else_statements_opt,
 			}
 		))
 	}

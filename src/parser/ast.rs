@@ -66,7 +66,8 @@ pub struct ReturnData {
 #[derive(Debug, Clone)]
 pub struct IfData {
 	pub condition: Expression,
-	pub statements: std::vec::Vec<BlockStatement>,
+	pub if_statements: std::vec::Vec<BlockStatement>,
+	pub else_statements: Option<std::vec::Vec<BlockStatement>>,
 }
 
 #[derive(Debug, Clone)]

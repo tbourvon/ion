@@ -433,7 +433,11 @@ impl<'a> Interpreter<'a> {
 		match try!(self.value_from_expression(vars, &if_data.condition)) {
 			Value::Bool(b) => {
 				if b {
-					for statement in &if_data.statements {
+					for statement in &if_data.if_statements {
+						try!(self.execute_block_statement(vars, statement));
+					}
+				} else if let Some(ref else_statements) = if_data.else_statements {
+					for statement in else_statements {
 						try!(self.execute_block_statement(vars, statement));
 					}
 				}
