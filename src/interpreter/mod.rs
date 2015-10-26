@@ -259,10 +259,17 @@ impl<'a> Interpreter<'a> {
 			};
 
 			let func_decl = if module_string == "" {
-				self.funcs.get(&last_id).unwrap()
+				match self.funcs.get(&last_id) {
+					Some(f) => f,
+					None => return Err("Interpreter error: unknown func".to_string())
+				}
 			} else {
 				let mut import_func_decl: Option<&FuncDeclData> = None;
-				for statement in &self.imports.get(&module_string).unwrap().statements {
+				let import_statements = match self.imports.get(&module_string) {
+					Some(ref m) => &m.statements,
+					None => return Err("Interpreter error: unknown module".to_string()),
+				};
+				for statement in import_statements {
 					match *statement {
 						Statement::FuncDecl(ref fd) => {
 							import_func_decl = Some(fd);
@@ -272,7 +279,10 @@ impl<'a> Interpreter<'a> {
 					}
 				}
 
-				import_func_decl.unwrap()
+				match import_func_decl {
+					Some(f) => f,
+					None => return Err("Interpreter error: unknown func".to_string())
+				}
 			};
 
 			let mut param_count = 0;
@@ -385,8 +395,10 @@ impl<'a> Interpreter<'a> {
 		let mut path = var_assignment_data.path.iter();
 
 		let mut current_ref = match **path.next().unwrap() {
-			PathPart::IdentifierPathPart(ref ipp) => unsafe {
-			&mut (*vars).get_mut(AsRef::<str>::as_ref(&ipp.identifier[..])).unwrap().value },
+			PathPart::IdentifierPathPart(ref ipp) => unsafe { match (*vars).get_mut(AsRef::<str>::as_ref(&ipp.identifier[..])) {
+				Some(cr) => &mut cr.value,
+				None => return Err("Interpreter error: unknown variable".to_string()),
+			} },
 			_ => return Err("Interpreter error: incorrect var path".to_string())
 		};
 
@@ -400,7 +412,10 @@ impl<'a> Interpreter<'a> {
 						_ => return Err("Interpreter error: cannot access field on non-struct".to_string())
 					};
 
-					current_ref = current_map.get_mut(&ipp.identifier).unwrap();
+					current_ref = match current_map.get_mut(&ipp.identifier) {
+						Some(cr) => cr,
+						None => return Err("Interpreter error: unknown struct field".to_string()),
+					};
 
 					is_field = false;
 				},
@@ -411,8 +426,9 @@ impl<'a> Interpreter<'a> {
 							match index_value {
 								Value::Integer(i) => {
 									let cell = match *{current_ref} {
-										Value::Array(_, ref mut a) => {
-											a.get_mut(i as usize).unwrap()
+										Value::Array(_, ref mut a) => match a.get_mut(i as usize) {
+											Some(v) => v,
+											None => return Err("Interpreter error: index out of bounds".to_string()),
 										},
 										_ => return Err("Interpreter error: can't access index on non-array".to_string())
 									};
@@ -512,7 +528,10 @@ impl<'a> Interpreter<'a> {
 
 				let mut current_ref = match **path.next().unwrap() {
 					PathPart::IdentifierPathPart(ref ipp) =>
-					unsafe { &(*vars).get(AsRef::<str>::as_ref(&ipp.identifier[..])).unwrap().value },
+					unsafe { match (*vars).get(AsRef::<str>::as_ref(&ipp.identifier[..])) {
+						Some(ref cr) => &cr.value,
+						None => return Err("Interpreter error: unknown variable".to_string()),
+					} },
 					_ => return Err("Interpreter error: incorrect var path".to_string())
 				};
 
@@ -526,7 +545,10 @@ impl<'a> Interpreter<'a> {
 								_ => return Err("Interpreter error: cannot access field on non-struct".to_string())
 							};
 
-							current_ref = current_map.get(&ipp.identifier).unwrap();
+							current_ref = match current_map.get(&ipp.identifier) {
+								Some(cr) => cr,
+								None => return Err("Interpreter error: unknown struct field".to_string()),
+							};
 
 							is_field = false;
 						},
@@ -537,8 +559,10 @@ impl<'a> Interpreter<'a> {
 									match index_value {
 										Value::Integer(i) => {
 											let cell = match *{current_ref} {
-												Value::Array(_, ref a) => a.get(i as usize).unwrap(),
-												Value::String(ref s) => return Ok(Value::Char(s.chars().nth(i as usize).unwrap())), // TODO: perform checks
+												Value::Array(_, ref a) => match a.get(i as usize) {
+													Some(v) => v,
+													None => return Err("Interpreter error: index out of bounds".to_string()),
+												},
 												_ => return Err("Interpreter error: can't access index on non-array".to_string())
 											};
 
@@ -595,10 +619,17 @@ impl<'a> Interpreter<'a> {
 				};
 
 				let struct_decl = if module_string == "" {
-					self.structs.get(&last_id).unwrap()
+					match self.structs.get(&last_id) {
+						Some(s) => s,
+						None => return Err("Interpreter error: unknown struct".to_string())
+					}
 				} else {
 					let mut import_struct_decl: Option<&StructDeclData> = None;
-					for statement in &self.imports.get(&module_string).unwrap().statements {
+					let import_statements = match self.imports.get(&module_string) {
+						Some(ref m) => &m.statements,
+						None => return Err("Interpreter error: unknown module".to_string()),
+					};
+					for statement in import_statements {
 						match *statement {
 							Statement::StructDecl(ref sd) => {
 								import_struct_decl = Some(sd);
@@ -608,7 +639,10 @@ impl<'a> Interpreter<'a> {
 						}
 					}
 
-					import_struct_decl.unwrap()
+					match import_struct_decl {
+						Some(s) => s,
+						None => return Err("Interpreter error: unknown struct".to_string())
+					}
 				};
 
 				let mut new_content: std::collections::HashMap<String, Box<Value>> = std::collections::HashMap::new();
@@ -660,7 +694,10 @@ impl<'a> Interpreter<'a> {
 				))
 			}
 			Expression::FuncCall(ref fc) => {
-				Ok(try!(self.execute_func_call(vars, fc)).unwrap())
+				match try!(self.execute_func_call(vars, fc)) {
+					Some(v) => Ok(v),
+					None => return Err("Interpreter error: func call in expression must return something".to_string()),
+				}
 			},
 			Expression::Count(ref e) => {
 				match try!(self.value_from_expression(vars, e)) {
@@ -823,10 +860,17 @@ impl<'a> Interpreter<'a> {
 				};
 
 				let struct_decl = if module_string == "" {
-					self.structs.get(&last_id).unwrap()
+					match self.structs.get(&last_id) {
+						Some(s) => s,
+						None => return Err("Interpreter error: unknown struct".to_string())
+					}
 				} else {
 					let mut import_struct_decl: Option<&StructDeclData> = None;
-					for statement in &self.imports.get(&module_string).unwrap().statements {
+					let import_statements = match self.imports.get(&module_string) {
+						Some(ref m) => &m.statements,
+						None => return Err("Interpreter error: unknown module".to_string()),
+					};
+					for statement in import_statements {
 						match *statement {
 							Statement::StructDecl(ref sd) => {
 								import_struct_decl = Some(sd);
@@ -836,7 +880,10 @@ impl<'a> Interpreter<'a> {
 						}
 					}
 
-					import_struct_decl.unwrap()
+					match import_struct_decl {
+						Some(s) => s,
+						None => return Err("Interpreter error: unknown struct".to_string())
+					}
 				};
 
 				let mut fields: std::collections::HashMap<String, Box<Value>> = std::collections::HashMap::new();
