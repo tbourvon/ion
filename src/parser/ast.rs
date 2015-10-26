@@ -47,6 +47,14 @@ pub enum BlockStatement {
 	If(Box<IfData>),
 	While(Box<WhileData>),
 	Return(Box<ReturnData>),
+	ForIn(Box<ForInData>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ForInData {
+	pub element_name: String,
+	pub collection: Expression,
+	pub statements: std::vec::Vec<BlockStatement>,
 }
 
 #[derive(Debug, Clone)]

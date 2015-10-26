@@ -10,6 +10,9 @@ pub enum Keyword {
     While,
     Struct,
     Return,
+    For,
+    In,
+    New,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -119,6 +122,9 @@ impl<'a> Reader<'a> {
             "while" => Ok(Token::Keyword(Keyword::While)),
             "struct" => Ok(Token::Keyword(Keyword::Struct)),
             "return" => Ok(Token::Keyword(Keyword::Return)),
+            "for" => Ok(Token::Keyword(Keyword::For)),
+            "in" => Ok(Token::Keyword(Keyword::In)),
+            "new" => Ok(Token::Keyword(Keyword::New)),
             _ => Ok(Token::Identifier(word)),
         }
     }

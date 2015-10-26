@@ -129,8 +129,54 @@ impl<'a> Interpreter<'a> {
 			BlockStatement::VarAssignment(ref va) => { try!(self.execute_var_assignment(vars, va)); Ok(None) },
 			BlockStatement::If(ref i) => { try!(self.execute_if(vars, i)); Ok(None) },
 			BlockStatement::While(ref w) => { try!(self.execute_while(vars, w)); Ok(None) },
+			BlockStatement::ForIn(ref fi) => { try!(self.execute_forin(vars, fi)); Ok(None) },
 			BlockStatement::Return(ref r) => self.execute_return(vars, r),
 		}
+	}
+
+	fn execute_forin(&self, vars: *mut InterpreterVars, forin_data: &ForInData) -> Result<(), String> {
+		let coll_value = try!(self.value_from_expression(vars, &forin_data.collection));
+		match coll_value {
+			Value::Array(t, a) => {
+				for elem in a {
+					unsafe {
+						(*vars).insert(
+							forin_data.element_name.clone(),
+							Variable {
+								name: forin_data.element_name.clone(),
+								var_type: t.clone().unwrap(),
+								value: elem,
+							}
+						);
+					}
+
+					for statement in &forin_data.statements {
+						try!(self.execute_block_statement(vars, statement));
+					}
+				}
+			},
+			Value::String(s) => {
+				for c in s.chars() {
+					unsafe {
+						(*vars).insert(
+							forin_data.element_name.clone(),
+							Variable {
+								name: forin_data.element_name.clone(),
+								var_type: Type::CharType,
+								value: Value::Char(c),
+							}
+						);
+					}
+
+					for statement in &forin_data.statements {
+						try!(self.execute_block_statement(vars, statement));
+					}
+				}
+			},
+			other => return Err(format!("Cannot iterate over {:?}", other)),
+		};
+
+		Ok(())
 	}
 
 	fn execute_return(&self, vars: *mut InterpreterVars, return_data: &ReturnData) -> Result<Option<Value>, String> {

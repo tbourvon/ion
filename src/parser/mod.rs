@@ -44,6 +44,7 @@ impl<'a> Parser<'a> {
 					Symbol::Times |
 					Symbol::Over |
 					Symbol::Modulo => 3,
+					Symbol::Hash => 4,
 					_ => 0
 				}
 			},
@@ -202,6 +203,8 @@ impl<'a> Parser<'a> {
 			Ok(BlockStatement::If(try!(self.parse_if())))
 		} else if try!(self.accept(Token::Keyword(Keyword::While))).is_some() {
 			Ok(BlockStatement::While(try!(self.parse_while())))
+		} else if try!(self.accept(Token::Keyword(Keyword::For))).is_some() {
+			Ok(BlockStatement::ForIn(try!(self.parse_forin())))
 		} else if try!(self.accept(Token::Keyword(Keyword::Return))).is_some() {
 			Ok(BlockStatement::Return(try!(self.parse_return(return_type))))
 		} else if let Some(identifier) = try!(self.accept_any(Token::Identifier("".to_string()))) {
@@ -301,6 +304,33 @@ impl<'a> Parser<'a> {
 		} else {
 			return Err(format!("Parser error: unexpected token {:?}", self.current_token))
 		}
+	}
+
+	fn parse_forin(&mut self) -> Result<Box<ForInData>, String> {
+		let element_token = try!(self.expect_any(Token::Identifier("".to_string())));
+		let element_name = match element_token {
+			Token::Identifier(s) => s,
+			_ => return Err("".to_string()), // Should never happen
+		};
+
+		try!(self.expect(Token::Keyword(Keyword::In)));
+
+		let collection = try!(self.parse_expression());
+
+		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
+
+		let mut statements: std::vec::Vec<BlockStatement> = vec![];
+		while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
+			statements.push(try!(self.parse_block_statement(None)));
+		};
+
+		Ok(Box::new(
+			ForInData {
+				element_name: element_name,
+				collection: collection,
+				statements: statements,
+			}
+		))
 	}
 
 	fn parse_return(&mut self, return_type: Option<Type>) -> Result<Box<ReturnData>, String> {
@@ -518,9 +548,53 @@ impl<'a> Parser<'a> {
 				} else if try!(self.accept(Token::Symbol(Symbol::Hash))).is_some() {
 					Expression::Count(
 						Box::new(
-							try!(self.parse_expression())
+							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Hash))))
 						)
 					)
+				} else if try!(self.accept(Token::Keyword(Keyword::New))).is_some() {
+					let identifier = try!(self.expect_any(Token::Identifier("".to_string())));
+					let mut path: Path = vec![];
+
+					let i = match identifier {
+						Token::Identifier(i) => i,
+						_ => return Err("".to_string()) // Should never happen
+					};
+
+					path.push(
+						Box::new(
+							PathPart::IdentifierPathPart(
+								Box::new(
+									IdentifierPathPartData { identifier: i }
+								)
+							)
+						)
+					);
+
+					while try!(self.accept(Token::Symbol(Symbol::ColonColon))).is_some() {
+						let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
+						let next_path = match next_path_token {
+							Token::Identifier(id) => id,
+							_ => return Err("".to_string()) // Should never happen
+						};
+
+						path.push(
+							Box::new(PathPart::ModulePathPart)
+						);
+
+						path.push(
+							Box::new(
+								PathPart::IdentifierPathPart(
+									Box::new(
+										IdentifierPathPartData { identifier: next_path }
+									)
+								)
+							)
+						);
+					}
+
+					try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
+
+					Expression::StructInit(try!(self.parse_struct_init(path)))
 				} else if let Some(string_literal) = try!(self.accept_any(Token::StringLiteral("".to_string()))) {
 					match string_literal {
 						Token::StringLiteral(s) => {
@@ -607,8 +681,6 @@ impl<'a> Parser<'a> {
 
 					if try!(self.accept(Token::Symbol(Symbol::LeftParenthesis))).is_some() {
 						Expression::FuncCall(try!(self.parse_func_call(path)))
-					} else if try!(self.accept(Token::Symbol(Symbol::LeftBrace))).is_some() {
-						Expression::StructInit(try!(self.parse_struct_init(path)))
 					} else {
 						loop {
 							if try!(self.accept(Token::Symbol(Symbol::Dot))).is_some() {
