@@ -127,14 +127,14 @@ impl<'a> Interpreter<'a> {
 			BlockStatement::FuncCall(ref fc) => { try!(self.execute_func_call(vars, fc)); Ok(None) },
 			BlockStatement::VarDecl(ref vd) => { try!(self.execute_var_decl(vars, vd)); Ok(None) },
 			BlockStatement::VarAssignment(ref va) => { try!(self.execute_var_assignment(vars, va)); Ok(None) },
-			BlockStatement::If(ref i) => { try!(self.execute_if(vars, i)); Ok(None) },
-			BlockStatement::While(ref w) => { try!(self.execute_while(vars, w)); Ok(None) },
-			BlockStatement::ForIn(ref fi) => { try!(self.execute_forin(vars, fi)); Ok(None) },
+			BlockStatement::If(ref i) => self.execute_if(vars, i),
+			BlockStatement::While(ref w) => self.execute_while(vars, w),
+			BlockStatement::ForIn(ref fi) => self.execute_forin(vars, fi),
 			BlockStatement::Return(ref r) => self.execute_return(vars, r),
 		}
 	}
 
-	fn execute_forin(&self, vars: *mut InterpreterVars, forin_data: &ForInData) -> Result<(), String> {
+	fn execute_forin(&self, vars: *mut InterpreterVars, forin_data: &ForInData) -> Result<Option<Value>, String> {
 		let coll_value = try!(self.value_from_expression(vars, &forin_data.collection));
 		match coll_value {
 			Value::Array(t, a) => {
@@ -151,7 +151,17 @@ impl<'a> Interpreter<'a> {
 					}
 
 					for statement in &forin_data.statements {
-						try!(self.execute_block_statement(vars, statement));
+						if let Some(v) = try!(self.execute_block_statement(vars, statement)) {
+							unsafe {
+								(*vars).remove(AsRef::<str>::as_ref(&forin_data.element_name[..]));
+							}
+
+							return Ok(Some(v))
+						}
+					}
+
+					unsafe {
+						(*vars).remove(AsRef::<str>::as_ref(&forin_data.element_name[..]));
 					}
 				}
 			},
@@ -169,14 +179,24 @@ impl<'a> Interpreter<'a> {
 					}
 
 					for statement in &forin_data.statements {
-						try!(self.execute_block_statement(vars, statement));
+						if let Some(v) = try!(self.execute_block_statement(vars, statement)) {
+							unsafe {
+								(*vars).remove(AsRef::<str>::as_ref(&forin_data.element_name[..]));
+							}
+
+							return Ok(Some(v))
+						}
+					}
+
+					unsafe {
+						(*vars).remove(AsRef::<str>::as_ref(&forin_data.element_name[..]));
 					}
 				}
 			},
 			other => return Err(format!("Cannot iterate over {:?}", other)),
 		};
 
-		Ok(())
+		Ok(None)
 	}
 
 	fn execute_return(&self, vars: *mut InterpreterVars, return_data: &ReturnData) -> Result<Option<Value>, String> {
@@ -300,13 +320,24 @@ impl<'a> Interpreter<'a> {
 			}
 
 			let mut return_value: Option<Value> = None;
+			let mut local_vars: std::vec::Vec<String> = vec![];
 			for statement in &func_decl.statements {
+				if let BlockStatement::VarDecl(ref vd) = *statement {
+					local_vars.push(vd.name.clone());
+				};
+
 				match try!(self.execute_block_statement(vars, statement)) {
 					Some(v) => {
 						return_value = Some(v);
 						break
 					},
 					None => ()
+				}
+			}
+
+			for local_var in &local_vars {
+				unsafe {
+					(*vars).remove(AsRef::<str>::as_ref(&local_var[..]));
 				}
 			}
 
@@ -429,34 +460,40 @@ impl<'a> Interpreter<'a> {
 		Ok(())
 	}
 
-	fn execute_if(&self, vars: *mut InterpreterVars, if_data: &'a IfData) -> Result<(), String> {
+	fn execute_if(&self, vars: *mut InterpreterVars, if_data: &'a IfData) -> Result<Option<Value>, String> {
 		match try!(self.value_from_expression(vars, &if_data.condition)) {
 			Value::Bool(b) => {
 				if b {
 					for statement in &if_data.if_statements {
-						try!(self.execute_block_statement(vars, statement));
+						if let Some(v) = try!(self.execute_block_statement(vars, statement)) {
+							return Ok(Some(v))
+						}
 					}
 				} else if let Some(ref else_statements) = if_data.else_statements {
 					for statement in else_statements {
-						try!(self.execute_block_statement(vars, statement));
+						if let Some(v) = try!(self.execute_block_statement(vars, statement)) {
+							return Ok(Some(v))
+						}
 					}
 				}
-				Ok(())
+				Ok(None)
 			},
 			_ => Err("Interpreter error: expected bool expression in if statement".to_string())
 		}
 	}
 
-	fn execute_while(&self, vars: *mut InterpreterVars, while_data: &'a WhileData) -> Result<(), String> {
+	fn execute_while(&self, vars: *mut InterpreterVars, while_data: &'a WhileData) -> Result<Option<Value>, String> {
 		loop {
 			match try!(self.value_from_expression(vars, &while_data.condition)) {
 				Value::Bool(b) => {
 					if b {
 						for statement in &while_data.statements {
-							try!(self.execute_block_statement(vars, statement));
+							if let Some(v) = try!(self.execute_block_statement(vars, statement)) {
+								return Ok(Some(v))
+							}
 						}
 					} else {
-						return Ok(())
+						return Ok(None)
 					}
 				},
 				_ => return Err("Interpreter error: expected bool expression in while statement".to_string())

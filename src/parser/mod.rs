@@ -200,11 +200,11 @@ impl<'a> Parser<'a> {
 		if try!(self.accept(Token::Keyword(Keyword::Var))).is_some() {
 			Ok(BlockStatement::VarDecl(try!(self.parse_var_decl())))
 		} else if try!(self.accept(Token::Keyword(Keyword::If))).is_some() {
-			Ok(BlockStatement::If(try!(self.parse_if())))
+			Ok(BlockStatement::If(try!(self.parse_if(return_type))))
 		} else if try!(self.accept(Token::Keyword(Keyword::While))).is_some() {
-			Ok(BlockStatement::While(try!(self.parse_while())))
+			Ok(BlockStatement::While(try!(self.parse_while(return_type))))
 		} else if try!(self.accept(Token::Keyword(Keyword::For))).is_some() {
-			Ok(BlockStatement::ForIn(try!(self.parse_forin())))
+			Ok(BlockStatement::ForIn(try!(self.parse_forin(return_type))))
 		} else if try!(self.accept(Token::Keyword(Keyword::Return))).is_some() {
 			Ok(BlockStatement::Return(try!(self.parse_return(return_type))))
 		} else if let Some(identifier) = try!(self.accept_any(Token::Identifier("".to_string()))) {
@@ -306,7 +306,7 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn parse_forin(&mut self) -> Result<Box<ForInData>, String> {
+	fn parse_forin(&mut self, return_type: Option<Type>) -> Result<Box<ForInData>, String> {
 		let element_token = try!(self.expect_any(Token::Identifier("".to_string())));
 		let element_name = match element_token {
 			Token::Identifier(s) => s,
@@ -321,7 +321,7 @@ impl<'a> Parser<'a> {
 
 		let mut statements: std::vec::Vec<BlockStatement> = vec![];
 		while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
-			statements.push(try!(self.parse_block_statement(None)));
+			statements.push(try!(self.parse_block_statement(return_type.clone())));
 		};
 
 		Ok(Box::new(
@@ -345,25 +345,25 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_if(&mut self) -> Result<Box<IfData>, String> {
+	fn parse_if(&mut self, return_type: Option<Type>) -> Result<Box<IfData>, String> {
 		let condition = try!(self.parse_expression());
 
 		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
 
 		let mut if_statements: std::vec::Vec<BlockStatement> = vec![];
 		while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
-			if_statements.push(try!(self.parse_block_statement(None)));
+			if_statements.push(try!(self.parse_block_statement(return_type.clone())));
 		};
 
 		let mut else_statements_opt: Option<std::vec::Vec<BlockStatement>> = None;
 		if try!(self.accept(Token::Keyword(Keyword::Else))).is_some() {
 			let mut else_statements: std::vec::Vec<BlockStatement> = vec![];
 			if try!(self.accept(Token::Keyword(Keyword::If))).is_some() {
-				else_statements.push(BlockStatement::If(try!(self.parse_if())));
+				else_statements.push(BlockStatement::If(try!(self.parse_if(return_type.clone()))));
 			} else {
 				try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
 				while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
-					else_statements.push(try!(self.parse_block_statement(None)));
+					else_statements.push(try!(self.parse_block_statement(return_type.clone())));
 				};
 			}
 
@@ -379,14 +379,14 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_while(&mut self) -> Result<Box<WhileData>, String> {
+	fn parse_while(&mut self, return_type: Option<Type>) -> Result<Box<WhileData>, String> {
 		let condition = try!(self.parse_expression());
 
 		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
 
 		let mut statements: std::vec::Vec<BlockStatement> = vec![];
 		while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
-			statements.push(try!(self.parse_block_statement(None)));
+			statements.push(try!(self.parse_block_statement(return_type.clone())));
 		};
 
 		Ok(Box::new(
