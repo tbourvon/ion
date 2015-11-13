@@ -1,7 +1,9 @@
 pub mod ast;
 
 use std;
+use lexer::SToken;
 use lexer::Token;
+use lexer::Span;
 use lexer::Reader;
 use lexer::Keyword;
 use lexer::Symbol;
@@ -10,7 +12,8 @@ use self::ast::*;
 pub struct Parser<'a> {
 	reader: &'a mut Reader<'a>,
 	ast: Box<Ast>,
-	current_token: Token,
+	last_sp: Span,
+	current_token: SToken,
 }
 
 impl<'a> Parser<'a> {
@@ -18,13 +21,27 @@ impl<'a> Parser<'a> {
 		Parser {
 			reader: reader,
 			ast: Box::new(Ast::new()),
-			current_token: Token::EOF,
+			last_sp: Span {
+				scol: 0,
+				srow: 0,
+				ecol: 0,
+				erow: 0,
+			},
+			current_token: SToken {
+				tok: Token::EOF,
+				sp: Span {
+					scol: 0,
+					srow: 0,
+					ecol: 0,
+					erow: 0,
+				}
+			},
 		}
 	}
 
 	pub fn parse(&mut self) -> Result<&Ast, String> {
 		try!(self.next_token());
-		while self.current_token != Token::EOF {
+		while self.current_token.tok != Token::EOF {
 			let statement = try!(self.parse_statement());
 			self.ast.statements.push(statement);
 		}
@@ -53,46 +70,52 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_statement(&mut self) -> Result<Statement, String> {
-		if try!(self.accept(Token::Keyword(Keyword::Import))).is_some() {
-			Ok(Statement::Import(try!(self.parse_import())))
-		} else if try!(self.accept(Token::Keyword(Keyword::Package))).is_some() {
-			Ok(Statement::Package(try!(self.parse_package())))
-		} else if try!(self.accept(Token::Keyword(Keyword::Func))).is_some() {
-			Ok(Statement::FuncDecl(try!(self.parse_func_decl())))
-		} else if try!(self.accept(Token::Keyword(Keyword::Struct))).is_some() {
-			Ok(Statement::StructDecl(try!(self.parse_struct_decl())))
+		if let Some(t) = try!(self.accept(Token::Keyword(Keyword::Import))) {
+			Ok(Statement::Import(try!(self.parse_import(t.sp))))
+		} else if let Some(t) = try!(self.accept(Token::Keyword(Keyword::Package))) {
+			Ok(Statement::Package(try!(self.parse_package(t.sp))))
+		} else if let Some(t) = try!(self.accept(Token::Keyword(Keyword::Func))) {
+			Ok(Statement::FuncDecl(try!(self.parse_func_decl(t.sp))))
+		} else if let Some(t) = try!(self.accept(Token::Keyword(Keyword::Struct))) {
+			Ok(Statement::StructDecl(try!(self.parse_struct_decl(t.sp))))
 		} else {
-			Err(format!("Parser error: unexpected token {:?}", self.current_token))
+			Err(format!("Parser error: unexpected token {:?}, {:?}", self.current_token.tok, self.current_token.sp))
 		}
 	}
 
-	fn parse_package(&mut self) -> Result<Box<PackageData>, String> {
+	fn parse_package(&mut self, start_sp: Span) -> Result<Box<PackageData>, String> {
 		let name_token = try!(self.expect_any(Token::Identifier("".to_string())));
-		match name_token {
+		match name_token.tok {
 			Token::Identifier(n) => {
 				Ok(Box::new(
-					PackageData { name: n }
+					PackageData {
+						span: Span::concat(start_sp, name_token.sp),
+						name: n,
+					}
 				))
 			},
 			_ => Err("".to_string()), // Should never happen
 		}
 	}
 
-	fn parse_import(&mut self) ->  Result<Box<ImportData>, String> {
+	fn parse_import(&mut self, start_sp: Span) ->  Result<Box<ImportData>, String> {
 		let path_token = try!(self.expect_any(Token::StringLiteral("".to_string())));
-		match path_token {
+		match path_token.tok {
 			Token::StringLiteral(p) => {
 				Ok(Box::new(
-					ImportData { path: p }
+					ImportData {
+						span: Span::concat(start_sp, path_token.sp),
+						path: p,
+					}
 				))
 			},
 			_ => Err("".to_string()), // Should never happen
 		}
 	}
 
-	fn parse_func_decl(&mut self) -> Result<Box<FuncDeclData>, String> {
+	fn parse_func_decl(&mut self, start_sp: Span) -> Result<Box<FuncDeclData>, String> {
 		let name_token = try!(self.expect_any(Token::Identifier("".to_string())));
-		let name = match name_token {
+		let name = match name_token.tok {
 			Token::Identifier(s) => s,
 			_ => return Err("".to_string()), // Should never happen
 		};
@@ -102,7 +125,7 @@ impl<'a> Parser<'a> {
 		let mut params: std::vec::Vec<Box<FuncDeclParamData>> = vec![];
 		while try!(self.accept(Token::Symbol(Symbol::RightParenthesis))).is_none() {
 			let arg_name_token = try!(self.expect_any(Token::Identifier("".to_string())));
-			let arg_name = match arg_name_token {
+			let arg_name = match arg_name_token.tok {
 				Token::Identifier(s) => s,
 				_ => return Err("".to_string()), // Should never happen
 			};
@@ -114,6 +137,7 @@ impl<'a> Parser<'a> {
 			params.push(
 				Box::new(
 					FuncDeclParamData {
+						span: Span::concat(arg_name_token.sp, self.last_sp.clone()),
 						name: arg_name,
 						param_type: arg_type,
 						default_value: None,
@@ -121,7 +145,7 @@ impl<'a> Parser<'a> {
 				)
 			);
 
-			if self.current_token == Token::Symbol(Symbol::RightParenthesis) {
+			if self.current_token.tok == Token::Symbol(Symbol::RightParenthesis) {
 				try!(self.accept(Token::Symbol(Symbol::Comma)));
 			} else {
 				try!(self.expect(Token::Symbol(Symbol::Comma)));
@@ -142,6 +166,7 @@ impl<'a> Parser<'a> {
 
 		Ok(Box::new(
 			FuncDeclData {
+				span: Span::concat(start_sp, self.last_sp.clone()),
 				name: name,
 				return_type: return_type,
 				parameters: params,
@@ -150,9 +175,9 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_struct_decl(&mut self) -> Result<Box<StructDeclData>, String> {
+	fn parse_struct_decl(&mut self, start_sp: Span) -> Result<Box<StructDeclData>, String> {
 		let name_token = try!(self.expect_any(Token::Identifier("".to_string())));
-		let name = match name_token {
+		let name = match name_token.tok {
 			Token::Identifier(s) => s,
 			_ => return Err("".to_string()), // Should never happen
 		};
@@ -162,7 +187,7 @@ impl<'a> Parser<'a> {
 		let mut fields: std::vec::Vec<Box<StructFieldData>> = vec![];
 		while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
 			let field_name_token = try!(self.expect_any(Token::Identifier("".to_string())));
-			let field_name = match field_name_token {
+			let field_name = match field_name_token.tok {
 				Token::Identifier(s) => s,
 				_ => return Err("".to_string()), // Should never happen
 			};
@@ -174,6 +199,7 @@ impl<'a> Parser<'a> {
 			fields.push(
 				Box::new(
 					StructFieldData {
+						span: Span::concat(field_name_token.sp, self.last_sp.clone()),
 						name: field_name,
 						field_type: field_type,
 						default_value: None,
@@ -181,7 +207,7 @@ impl<'a> Parser<'a> {
 				)
 			);
 
-			if self.current_token == Token::Symbol(Symbol::RightBrace) {
+			if self.current_token.tok == Token::Symbol(Symbol::RightBrace) {
 				try!(self.accept(Token::Symbol(Symbol::Comma)));
 			} else {
 				try!(self.expect(Token::Symbol(Symbol::Comma)));
@@ -190,6 +216,7 @@ impl<'a> Parser<'a> {
 
 		Ok(Box::new(
 			StructDeclData {
+				span: Span::concat(start_sp, self.last_sp.clone()),
 				name: name,
 				fields: fields,
 			}
@@ -197,18 +224,18 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_block_statement(&mut self, return_type: Option<Type>) -> Result<BlockStatement, String> {
-		if try!(self.accept(Token::Keyword(Keyword::Var))).is_some() {
-			Ok(BlockStatement::VarDecl(try!(self.parse_var_decl())))
-		} else if try!(self.accept(Token::Keyword(Keyword::If))).is_some() {
-			Ok(BlockStatement::If(try!(self.parse_if(return_type))))
-		} else if try!(self.accept(Token::Keyword(Keyword::While))).is_some() {
-			Ok(BlockStatement::While(try!(self.parse_while(return_type))))
-		} else if try!(self.accept(Token::Keyword(Keyword::For))).is_some() {
-			Ok(BlockStatement::ForIn(try!(self.parse_forin(return_type))))
-		} else if try!(self.accept(Token::Keyword(Keyword::Return))).is_some() {
-			Ok(BlockStatement::Return(try!(self.parse_return(return_type))))
+		if let Some(t) = try!(self.accept(Token::Keyword(Keyword::Var))) {
+			Ok(BlockStatement::VarDecl(try!(self.parse_var_decl(t.sp))))
+		} else if let Some(t) = try!(self.accept(Token::Keyword(Keyword::If))) {
+			Ok(BlockStatement::If(try!(self.parse_if(return_type, t.sp))))
+		} else if let Some(t) = try!(self.accept(Token::Keyword(Keyword::While))) {
+			Ok(BlockStatement::While(try!(self.parse_while(return_type, t.sp))))
+		} else if let Some(t) = try!(self.accept(Token::Keyword(Keyword::For))) {
+			Ok(BlockStatement::ForIn(try!(self.parse_forin(return_type, t.sp))))
+		} else if let Some(t) = try!(self.accept(Token::Keyword(Keyword::Return))) {
+			Ok(BlockStatement::Return(try!(self.parse_return(return_type, t.sp))))
 		} else if let Some(identifier) = try!(self.accept_any(Token::Identifier("".to_string()))) {
-			match identifier {
+			match identifier.tok {
 				Token::Identifier(i) => {
 					let mut path: Path = vec![];
 
@@ -216,7 +243,10 @@ impl<'a> Parser<'a> {
 						Box::new(
 							PathPart::IdentifierPathPart(
 								Box::new(
-									IdentifierPathPartData { identifier: i }
+									IdentifierPathPartData {
+										span: identifier.sp.clone(),
+										identifier: i
+									}
 								)
 							)
 						)
@@ -224,7 +254,7 @@ impl<'a> Parser<'a> {
 
 					while try!(self.accept(Token::Symbol(Symbol::ColonColon))).is_some() {
 						let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
-						let next_path = match next_path_token {
+						let next_path = match next_path_token.tok {
 							Token::Identifier(id) => id,
 							_ => return Err("".to_string()) // Should never happen
 						};
@@ -237,7 +267,9 @@ impl<'a> Parser<'a> {
 							Box::new(
 								PathPart::IdentifierPathPart(
 									Box::new(
-										IdentifierPathPartData { identifier: next_path }
+										IdentifierPathPartData {
+											span: next_path_token.sp,											identifier: next_path
+										}
 									)
 								)
 							)
@@ -245,12 +277,12 @@ impl<'a> Parser<'a> {
 					}
 
 					if try!(self.accept(Token::Symbol(Symbol::LeftParenthesis))).is_some() {
-						Ok(BlockStatement::FuncCall(try!(self.parse_func_call(path))))
+						Ok(BlockStatement::FuncCall(try!(self.parse_func_call(path, identifier.sp))))
 					} else {
 						loop {
 							if try!(self.accept(Token::Symbol(Symbol::Dot))).is_some() {
 								let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
-								let next_path = match next_path_token {
+								let next_path = match next_path_token.tok {
 									Token::Identifier(id) => id,
 									_ => return Err("".to_string()) // Should never happen
 								};
@@ -263,12 +295,17 @@ impl<'a> Parser<'a> {
 									Box::new(
 										PathPart::IdentifierPathPart(
 											Box::new(
-												IdentifierPathPartData { identifier: next_path }
+												IdentifierPathPartData {
+													span: next_path_token.sp,
+													identifier: next_path
+												}
 											)
 										)
 									)
 								);
 							} else if try!(self.accept(Token::Symbol(Symbol::LeftBracket))).is_some() {
+								let st_sp = self.last_sp.clone();
+
 								let index = if try!(self.accept(Token::Symbol(Symbol::RightBracket))).is_some() {
 									None
 								} else {
@@ -282,7 +319,10 @@ impl<'a> Parser<'a> {
 									Box::new(
 										PathPart::IndexPathPart(
 											Box::new(
-												IndexPathPartData { index: index }
+												IndexPathPartData {
+													span: Span::concat(st_sp, self.last_sp.clone()),
+													index: index
+												}
 											)
 										)
 									)
@@ -293,22 +333,22 @@ impl<'a> Parser<'a> {
 						}
 
 						if try!(self.accept(Token::Symbol(Symbol::Equal))).is_some() {
-							Ok(BlockStatement::VarAssignment(try!(self.parse_var_assignment(path))))
+							Ok(BlockStatement::VarAssignment(try!(self.parse_var_assignment(path, identifier.sp))))
 						} else {
-							return Err(format!("Parser error: unexpected token {:?}", self.current_token))
+							return Err(format!("Parser error: unexpected token {:?}, {:?}", self.current_token.tok, self.current_token.sp))
 						}
 					}
 				},
 				_ => return Err("".to_string()), // Should never happen
 			}
 		} else {
-			return Err(format!("Parser error: unexpected token {:?}", self.current_token))
+			return Err(format!("Parser error: unexpected token {:?}, {:?}", self.current_token.tok, self.current_token.sp))
 		}
 	}
 
-	fn parse_forin(&mut self, return_type: Option<Type>) -> Result<Box<ForInData>, String> {
+	fn parse_forin(&mut self, return_type: Option<Type>, start_sp: Span) -> Result<Box<ForInData>, String> {
 		let element_token = try!(self.expect_any(Token::Identifier("".to_string())));
-		let element_name = match element_token {
+		let element_name = match element_token.tok {
 			Token::Identifier(s) => s,
 			_ => return Err("".to_string()), // Should never happen
 		};
@@ -326,6 +366,7 @@ impl<'a> Parser<'a> {
 
 		Ok(Box::new(
 			ForInData {
+				span: Span::concat(start_sp, self.last_sp.clone()),
 				element_name: element_name,
 				collection: collection,
 				statements: statements,
@@ -333,19 +374,20 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_return(&mut self, return_type: Option<Type>) -> Result<Box<ReturnData>, String> {
+	fn parse_return(&mut self, return_type: Option<Type>, start_sp: Span) -> Result<Box<ReturnData>, String> {
 		Ok(Box::new(
 			ReturnData {
 				value: match return_type {
 					Some(_) => Some(try!(self.parse_expression())),
 					None => None,
 				},
+				span: Span::concat(start_sp, self.last_sp.clone()),
 				expected_type: return_type,
 			}
 		))
 	}
 
-	fn parse_if(&mut self, return_type: Option<Type>) -> Result<Box<IfData>, String> {
+	fn parse_if(&mut self, return_type: Option<Type>, start_sp: Span) -> Result<Box<IfData>, String> {
 		let condition = try!(self.parse_expression());
 
 		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
@@ -358,8 +400,8 @@ impl<'a> Parser<'a> {
 		let mut else_statements_opt: Option<std::vec::Vec<BlockStatement>> = None;
 		if try!(self.accept(Token::Keyword(Keyword::Else))).is_some() {
 			let mut else_statements: std::vec::Vec<BlockStatement> = vec![];
-			if try!(self.accept(Token::Keyword(Keyword::If))).is_some() {
-				else_statements.push(BlockStatement::If(try!(self.parse_if(return_type.clone()))));
+			if let Some(t) = try!(self.accept(Token::Keyword(Keyword::If))) {
+				else_statements.push(BlockStatement::If(try!(self.parse_if(return_type.clone(), t.sp))));
 			} else {
 				try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
 				while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
@@ -372,6 +414,7 @@ impl<'a> Parser<'a> {
 
 		Ok(Box::new(
 			IfData {
+				span: Span::concat(start_sp, self.last_sp.clone()),
 				condition: condition,
 				if_statements: if_statements,
 				else_statements: else_statements_opt,
@@ -379,7 +422,7 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_while(&mut self, return_type: Option<Type>) -> Result<Box<WhileData>, String> {
+	fn parse_while(&mut self, return_type: Option<Type>, start_sp: Span) -> Result<Box<WhileData>, String> {
 		let condition = try!(self.parse_expression());
 
 		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
@@ -391,21 +434,27 @@ impl<'a> Parser<'a> {
 
 		Ok(Box::new(
 			WhileData {
+				span: Span::concat(start_sp, self.last_sp.clone()),
 				condition: condition,
 				statements: statements,
 			}
 		))
 	}
 
-	fn parse_func_call(&mut self, path: Path) -> Result<Box<FuncCallData>, String> {
+	fn parse_func_call(&mut self, path: Path, start_sp: Span) -> Result<Box<FuncCallData>, String> {
 		let mut args: std::vec::Vec<Box<FuncCallArgData>> = vec![];
 		while try!(self.accept(Token::Symbol(Symbol::RightParenthesis))).is_none() {
+			let sp = self.current_token.sp.clone();
+
 			args.push(
 				Box::new(
-					FuncCallArgData { value: try!(self.parse_expression()) }
+					FuncCallArgData {
+						value: try!(self.parse_expression()),
+						span: Span::concat(sp, self.last_sp.clone())
+					}
 				)
 			);
-			if self.current_token == Token::Symbol(Symbol::RightParenthesis) {
+			if self.current_token.tok == Token::Symbol(Symbol::RightParenthesis) {
 				try!(self.accept(Token::Symbol(Symbol::Comma)));
 			} else {
 				try!(self.expect(Token::Symbol(Symbol::Comma)));
@@ -414,15 +463,16 @@ impl<'a> Parser<'a> {
 
 		Ok(Box::new(
 			FuncCallData {
+				span: Span::concat(start_sp, self.last_sp.clone()),
 				path: path,
 				arguments: args,
 			}
 		))
 	}
 
-	fn parse_var_decl(&mut self) -> Result<Box<VarDeclData>, String> {
+	fn parse_var_decl(&mut self, start_sp: Span) -> Result<Box<VarDeclData>, String> {
 		let name_token = try!(self.expect_any(Token::Identifier("".to_string())));
-		let name = match name_token {
+		let name = match name_token.tok {
 			Token::Identifier(i) => i,
 			_ => return Err("".to_string()), // Should never happen
 		};
@@ -439,6 +489,7 @@ impl<'a> Parser<'a> {
 
 		Ok(Box::new(
 			VarDeclData {
+				span: Span::concat(start_sp, self.last_sp.clone()),
 				name: name,
 				var_type: var_type,
 				value: value
@@ -446,10 +497,11 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_var_assignment(&mut self, path: Path) -> Result<Box<VarAssignmentData>, String> {
+	fn parse_var_assignment(&mut self, path: Path, start_sp: Span) -> Result<Box<VarAssignmentData>, String> {
 		let expression = try!(self.parse_expression());
 		Ok(Box::new(
 			VarAssignmentData {
+				span: Span::concat(start_sp, self.last_sp.clone()),
 				path: path,
 				value: expression,
 			}
@@ -545,11 +597,18 @@ impl<'a> Parser<'a> {
 					try!(self.expect(Token::Symbol(Symbol::RightParenthesis)));
 
 					e
-				} else if try!(self.accept(Token::Symbol(Symbol::LeftBracket))).is_some() {
+				} else if let Some(h) = try!(self.accept(Token::Symbol(Symbol::Hash))) {
+					Expression::Count(
+						Box::new(
+							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Hash))))
+						),
+						h.sp
+					)
+				} else if let Some(lb) = try!(self.accept(Token::Symbol(Symbol::LeftBracket))) {
 					let mut items: std::vec::Vec<Expression> = vec![];
 					while try!(self.accept(Token::Symbol(Symbol::RightBracket))).is_none() {
 						items.push(try!(self.parse_expression()));
-						if self.current_token == Token::Symbol(Symbol::RightBracket) {
+						if self.current_token.tok == Token::Symbol(Symbol::RightBracket) {
 							try!(self.accept(Token::Symbol(Symbol::Comma)));
 						} else {
 							try!(self.expect(Token::Symbol(Symbol::Comma)));
@@ -558,20 +617,17 @@ impl<'a> Parser<'a> {
 
 					Expression::Array(
 						Box::new(
-							ArrayData { items: items }
+							ArrayData {
+								span: Span::concat(lb.sp, self.last_sp.clone()),
+								items: items
+							}
 						)
 					)
-				} else if try!(self.accept(Token::Symbol(Symbol::Hash))).is_some() {
-					Expression::Count(
-						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Hash))))
-						)
-					)
-				} else if try!(self.accept(Token::Keyword(Keyword::New))).is_some() {
+				} else if let Some(n) = try!(self.accept(Token::Keyword(Keyword::New))) {
 					let identifier = try!(self.expect_any(Token::Identifier("".to_string())));
 					let mut path: Path = vec![];
 
-					let i = match identifier {
+					let i = match identifier.tok {
 						Token::Identifier(i) => i,
 						_ => return Err("".to_string()) // Should never happen
 					};
@@ -580,7 +636,10 @@ impl<'a> Parser<'a> {
 						Box::new(
 							PathPart::IdentifierPathPart(
 								Box::new(
-									IdentifierPathPartData { identifier: i }
+									IdentifierPathPartData {
+										span: identifier.sp,
+										identifier: i
+									}
 								)
 							)
 						)
@@ -588,7 +647,7 @@ impl<'a> Parser<'a> {
 
 					while try!(self.accept(Token::Symbol(Symbol::ColonColon))).is_some() {
 						let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
-						let next_path = match next_path_token {
+						let next_path = match next_path_token.tok {
 							Token::Identifier(id) => id,
 							_ => return Err("".to_string()) // Should never happen
 						};
@@ -601,7 +660,10 @@ impl<'a> Parser<'a> {
 							Box::new(
 								PathPart::IdentifierPathPart(
 									Box::new(
-										IdentifierPathPartData { identifier: next_path }
+										IdentifierPathPartData {
+											span: next_path_token.sp,
+											identifier: next_path
+										}
 									)
 								)
 							)
@@ -610,46 +672,58 @@ impl<'a> Parser<'a> {
 
 					try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
 
-					Expression::StructInit(try!(self.parse_struct_init(path)))
+					Expression::StructInit(try!(self.parse_struct_init(path, n.sp)))
 				} else if let Some(string_literal) = try!(self.accept_any(Token::StringLiteral("".to_string()))) {
-					match string_literal {
+					match string_literal.tok {
 						Token::StringLiteral(s) => {
 							Expression::StringLiteral(
 								Box::new(
-									StringLiteralData { value: s }
+									StringLiteralData {
+										span: string_literal.sp,
+										value: s
+									}
 								)
 							)
 						},
 						_ => return Err("".to_string()) // Should never happen
 					}
 				} else if let Some(integer_literal) = try!(self.accept_any(Token::IntegerLiteral(0))) {
-					match integer_literal {
+					match integer_literal.tok {
 						Token::IntegerLiteral(i) => {
 							Expression::IntegerLiteral(
 								Box::new(
-									IntegerLiteralData { value: i }
+									IntegerLiteralData {
+										span: integer_literal.sp,
+										value: i
+									}
 								)
 							)
 						},
 						_ => return Err("".to_string()) // Should never happen
 					}
 				} else if let Some(bool_literal) = try!(self.accept_any(Token::BoolLiteral(false))) {
-					match bool_literal {
+					match bool_literal.tok {
 						Token::BoolLiteral(b) => {
 							Expression::BoolLiteral(
 								Box::new(
-									BoolLiteralData { value: b }
+									BoolLiteralData {
+										span: bool_literal.sp,
+										value: b
+									}
 								)
 							)
 						},
 						_ => return Err("".to_string()) // Should never happen
 					}
 				} else if let Some(char_literal) = try!(self.accept_any(Token::CharLiteral('\0'))) {
-					match char_literal {
+					match char_literal.tok {
 						Token::CharLiteral(c) => {
 							Expression::CharLiteral(
 								Box::new(
-									CharLiteralData { value: c }
+									CharLiteralData {
+										span: char_literal.sp,
+										value: c
+									}
 								)
 							)
 						},
@@ -658,7 +732,7 @@ impl<'a> Parser<'a> {
 				} else if let Some(identifier) = try!(self.accept_any(Token::Identifier("".to_string()))) {
 					let mut path: Path = vec![];
 
-					let i = match identifier {
+					let i = match identifier.tok {
 						Token::Identifier(i) => i,
 						_ => return Err("".to_string()) // Should never happen
 					};
@@ -667,7 +741,10 @@ impl<'a> Parser<'a> {
 						Box::new(
 							PathPart::IdentifierPathPart(
 								Box::new(
-									IdentifierPathPartData { identifier: i }
+									IdentifierPathPartData {
+										span: identifier.sp.clone(),
+										identifier: i
+									}
 								)
 							)
 						)
@@ -675,7 +752,7 @@ impl<'a> Parser<'a> {
 
 					while try!(self.accept(Token::Symbol(Symbol::ColonColon))).is_some() {
 						let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
-						let next_path = match next_path_token {
+						let next_path = match next_path_token.tok {
 							Token::Identifier(id) => id,
 							_ => return Err("".to_string()) // Should never happen
 						};
@@ -688,7 +765,10 @@ impl<'a> Parser<'a> {
 							Box::new(
 								PathPart::IdentifierPathPart(
 									Box::new(
-										IdentifierPathPartData { identifier: next_path }
+										IdentifierPathPartData {
+											span: next_path_token.sp,
+											identifier: next_path
+										}
 									)
 								)
 							)
@@ -696,12 +776,12 @@ impl<'a> Parser<'a> {
 					}
 
 					if try!(self.accept(Token::Symbol(Symbol::LeftParenthesis))).is_some() {
-						Expression::FuncCall(try!(self.parse_func_call(path)))
+						Expression::FuncCall(try!(self.parse_func_call(path, identifier.sp)))
 					} else {
 						loop {
 							if try!(self.accept(Token::Symbol(Symbol::Dot))).is_some() {
 								let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
-								let next_path = match next_path_token {
+								let next_path = match next_path_token.tok {
 									Token::Identifier(id) => id,
 									_ => return Err("".to_string()) // Should never happen
 								};
@@ -714,12 +794,15 @@ impl<'a> Parser<'a> {
 									Box::new(
 										PathPart::IdentifierPathPart(
 											Box::new(
-												IdentifierPathPartData { identifier: next_path }
+												IdentifierPathPartData {
+													span: next_path_token.sp,
+													identifier: next_path
+												}
 											)
 										)
 									)
 								);
-							} else if try!(self.accept(Token::Symbol(Symbol::LeftBracket))).is_some() {
+							} else if let Some(lb) =  try!(self.accept(Token::Symbol(Symbol::LeftBracket))) {
 								let expr = try!(self.parse_expression());
 								try!(self.expect(Token::Symbol(Symbol::RightBracket)));
 
@@ -727,7 +810,10 @@ impl<'a> Parser<'a> {
 									Box::new(
 										PathPart::IndexPathPart(
 											Box::new(
-												IndexPathPartData { index: Some(expr) }
+												IndexPathPartData {
+													span: Span::concat(lb.sp, self.last_sp.clone()),
+													index: Some(expr)
+												}
 											)
 										)
 									)
@@ -739,28 +825,31 @@ impl<'a> Parser<'a> {
 
 						Expression::Variable(
 							Box::new(
-								VariableData { path: path }
+								VariableData {
+									span: Span::concat(identifier.sp, self.last_sp.clone()),
+									path: path
+								}
 							)
 						)
 					}
 				} else {
-					return Err(format!("Parser error: unexpected token {:?}, ast: {:#?}", self.current_token, self.ast))
+					return Err(format!("Parser error: unexpected token {:?}. {:?}", self.current_token.tok, self.current_token.sp))
 				}
 			},
 		};
 
-		if Self::precedence_for_token(self.current_token.clone()) > minimum_precedence {
+		if Self::precedence_for_token(self.current_token.tok.clone()) > minimum_precedence {
 			self.parse_expression_rec(Some(new_expr), minimum_precedence)
 		} else {
 			Ok(new_expr)
 		}
 	}
 
-	fn parse_struct_init(&mut self, path: Path) -> Result<Box<StructInitData>, String> {
+	fn parse_struct_init(&mut self, path: Path, start_sp: Span) -> Result<Box<StructInitData>, String> {
 		let mut fields: std::vec::Vec<Box<StructInitFieldData>> = vec![];
 		while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
 			let field_name_token = try!(self.expect_any(Token::Identifier("".to_string())));
-			let field_name = match field_name_token {
+			let field_name = match field_name_token.tok {
 				Token::Identifier(s) => s,
 				_ => return Err("".to_string()), // Should never happen
 			};
@@ -772,13 +861,14 @@ impl<'a> Parser<'a> {
 			fields.push(
 				Box::new(
 					StructInitFieldData {
+						span: Span::concat(field_name_token.sp, self.last_sp.clone()),
 						name: field_name,
 						value: field_value,
 					}
 				)
 			);
 
-			if self.current_token == Token::Symbol(Symbol::RightBrace) {
+			if self.current_token.tok == Token::Symbol(Symbol::RightBrace) {
 				try!(self.accept(Token::Symbol(Symbol::Comma)));
 			} else {
 				try!(self.expect(Token::Symbol(Symbol::Comma)));
@@ -787,6 +877,7 @@ impl<'a> Parser<'a> {
 
 		Ok(Box::new(
 			StructInitData {
+				span: Span::concat(start_sp, self.last_sp.clone()),
 				path: path,
 				fields: fields,
 			}
@@ -824,12 +915,15 @@ impl<'a> Parser<'a> {
 
 		let mut path: Path = vec![];
 		let type_token = try!(self.expect_any(Token::Identifier("".to_string())));
-		match type_token {
+		match type_token.tok {
 			Token::Identifier(i) => path.push(
 				Box::new(
 					PathPart::IdentifierPathPart(
 						Box::new(
-							IdentifierPathPartData { identifier: i }
+							IdentifierPathPartData {
+								span: type_token.sp,
+								identifier: i
+							}
 						)
 					)
 				)
@@ -839,7 +933,7 @@ impl<'a> Parser<'a> {
 
 		while try!(self.accept(Token::Symbol(Symbol::ColonColon))).is_some() {
 			let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
-			let next_path = match next_path_token {
+			let next_path = match next_path_token.tok {
 				Token::Identifier(id) => id,
 				_ => return Err("".to_string()) // Should never happen
 			};
@@ -852,7 +946,10 @@ impl<'a> Parser<'a> {
 				Box::new(
 					PathPart::IdentifierPathPart(
 						Box::new(
-							IdentifierPathPartData { identifier: next_path }
+							IdentifierPathPartData {
+								span: next_path_token.sp,
+								identifier: next_path
+							}
 						)
 					)
 				)
@@ -863,25 +960,35 @@ impl<'a> Parser<'a> {
 			Some(t) => Ok(t),
 			None => Ok(Type::StructType(
 				Box::new(
-					StructTypeData { path: path }
+					StructTypeData {
+						path: path
+					}
 				)
 			))
 		}
 	}
 
-	fn skip_newlines(&mut self) -> Result<(), String> {
-		while self.current_token == Token::Symbol(Symbol::NewLine) {
+	fn skip_newlines(&mut self) -> Result<Span, String> {
+		let mut sp = Span {
+			scol: self.current_token.sp.scol,
+			srow: self.current_token.sp.srow,
+			ecol: self.current_token.sp.scol, // intended
+			erow: self.current_token.sp.srow, // intended
+		};
+
+		while self.current_token.tok == Token::Symbol(Symbol::NewLine) {
+			sp = Span::concat(sp, self.current_token.sp.clone());
 			try!(self.next_token());
 		};
 
-		Ok(())
+		Ok(sp)
 	}
 
-	fn accept(&mut self, token: Token) -> Result<Option<Token>, String> {
+	fn accept(&mut self, mtoken: Token) -> Result<Option<SToken>, String> {
 		// TODO: use intrinsics with determinants, but unstable for now. Could also use macros
 		// around enums to be able to automatically expand them into a match, but would be too
 		// invasive.
-		let token = match (self.current_token.clone(), token) {
+		let token = match (self.current_token.tok.clone(), mtoken) {
 			(Token::EOF, Token::EOF) => Some(self.current_token.clone()),
 			(Token::Identifier(ref a), Token::Identifier(ref b)) if (a == b) => Some(self.current_token.clone()),
 			(Token::Keyword(ref a), Token::Keyword(ref b)) if (a == b) => Some(self.current_token.clone()),
@@ -902,9 +1009,9 @@ impl<'a> Parser<'a> {
 		Ok(token)
 	}
 
-	fn accept_any(&mut self, token: Token) -> Result<Option<Token>, String> {
+	fn accept_any(&mut self, mtoken: Token) -> Result<Option<SToken>, String> {
 		// TODO: same as accept()
-		let token = match (self.current_token.clone(), token) {
+		let token = match (self.current_token.tok.clone(), mtoken) {
 			(Token::EOF, Token::EOF) => Some(self.current_token.clone()),
 			(Token::Identifier(_), Token::Identifier(_)) => Some(self.current_token.clone()),
 			(Token::Keyword(_), Token::Keyword(_)) => Some(self.current_token.clone()),
@@ -925,23 +1032,24 @@ impl<'a> Parser<'a> {
 		Ok(token)
 	}
 
-	fn expect(&mut self, token: Token) -> Result<Token, String> {
+	fn expect(&mut self, token: Token) -> Result<SToken, String> {
 		match try!(self.accept(token.clone())) {
 			Some(t) => Ok(t),
-			None => return Err(format!("Parser error: expected {:?}", token)),
+			None => Err(format!("Parser error: expected {:?}, {:?}", token, self.current_token.sp)),
 		}
 	}
 
-	fn expect_any(&mut self, token: Token) -> Result<Token, String> {
+	fn expect_any(&mut self, token: Token) -> Result<SToken, String> {
 		match try!(self.accept_any(token.clone())) {
 			Some(t) => Ok(t),
-			None => return Err(format!("Parser error: expected {:?}", token)),
+			None => Err(format!("Parser error: expected {:?}, {:?}", token, self.current_token.sp)),
 		}
 	}
 
-	fn next_token(&mut self) -> Result<Token, String> {
+	fn next_token(&mut self) -> Result<SToken, String> {
 		match self.reader.next_token() {
 			Ok(t) => {
+				self.last_sp = self.current_token.sp.clone();
 				self.current_token = t;
 				Ok(self.current_token.clone())
 			},
