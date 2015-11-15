@@ -122,6 +122,7 @@ pub struct FuncDeclParamData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
+	ReferenceType(Box<Type>),
 	ArrayType(Box<Type>),
 	StructType(Box<StructTypeData>),
 	StringType,
@@ -160,6 +161,8 @@ pub enum Expression {
 	StructInit(Box<StructInitData>),
 	Array(Box<ArrayData>),
 	FuncCall(Box<FuncCallData>),
+	Reference(Box<Expression>, Span),
+	Dereference(Box<Expression>, Span),
 	Addition(Box<Expression>, Box<Expression>),
 	Substraction(Box<Expression>, Box<Expression>),
 	Multiplication(Box<Expression>, Box<Expression>),
@@ -182,6 +185,8 @@ impl Span {
 			Expression::StructInit(ref si) => si.span.clone(),
 			Expression::Array(ref a) => a.span.clone(),
 			Expression::FuncCall(ref fc) => fc.span.clone(),
+			Expression::Reference(ref e, ref s) => Span::concat((*s).clone(), Span::from_expression(e)),
+			Expression::Dereference(ref e, ref s) => Span::concat((*s).clone(), Span::from_expression(e)),
 			Expression::Addition(ref e1, ref e2) => Span::concat(Span::from_expression(e1), Span::from_expression(e2)),
 			Expression::Substraction(ref e1, ref e2) => Span::concat(Span::from_expression(e1), Span::from_expression(e2)),
 			Expression::Multiplication(ref e1, ref e2) => Span::concat(Span::from_expression(e1), Span::from_expression(e2)),

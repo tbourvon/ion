@@ -33,7 +33,7 @@ pub enum Symbol {
     Plus,
     PlusPlus,
     Minus,
-    Times,
+    Star,
     Over,
     Modulo,
     NotEqual,
@@ -45,6 +45,7 @@ pub enum Symbol {
     MoreOrEqual,
     Concat,
     Return,
+    Amp,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -307,6 +308,7 @@ impl<'a> Reader<'a> {
             ']' => Ok(Token::Symbol(Symbol::RightBracket)),
             '{' => Ok(Token::Symbol(Symbol::LeftBrace)),
             '}' => Ok(Token::Symbol(Symbol::RightBrace)),
+            '&' => Ok(Token::Symbol(Symbol::Amp)),
             '\n' => {
                 self.current_col = 0;
                 self.current_row += 1;
@@ -350,7 +352,7 @@ impl<'a> Reader<'a> {
                     _ => Ok(Token::Symbol(Symbol::Minus)),
                 }
             },
-            '*' => Ok(Token::Symbol(Symbol::Times)),
+            '*' => Ok(Token::Symbol(Symbol::Star)),
             '/' => Ok(Token::Symbol(Symbol::Over)),
             '%' => Ok(Token::Symbol(Symbol::Modulo)),
             '!' => {

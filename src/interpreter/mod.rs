@@ -14,23 +14,26 @@ pub struct Interpreter<'a> {
 	imports: std::collections::HashMap<String, Box<Ast>>, // TODO: Bloody get rid of Strings for indexing... preferably Path indexing would be best
 }
 
-type InterpreterVars = std::collections::HashMap<String, Variable>; // TODO: Bloody get rid of Strings for indexing... preferably Path indexing would be best
+pub struct InterpreterContext<'a> {
+	vars: std::collections::HashMap<String, Variable<'a>>, // TODO: Bloody get rid of Strings for indexing... preferably Path indexing would be best
+}
 
 #[derive(Debug)]
-pub struct Variable {
+pub struct Variable<'a> {
 	name: String,
 	var_type: Type,
-	value: Value,
+	value: Value<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Value {
+pub enum Value<'a> {
 	String(String),
 	Integer(i64),
 	Bool(bool),
 	Char(char),
-	Struct(Type, std::collections::HashMap<String, Box<Value>>),
-	Array(Option<Type>, std::vec::Vec<Value>),
+	Struct(Type, std::collections::HashMap<String, Box<Value<'a>>>),
+	Array(Option<Type>, std::vec::Vec<Value<'a>>),
+	Reference(Path, &'a Value<'a>),
 }
 
 impl<'a> Interpreter<'a> {
@@ -91,17 +94,19 @@ impl<'a> Interpreter<'a> {
 			arguments: vec![],
 		};
 
-		let mut vars = std::collections::HashMap::new();
-		try!(self.execute_func_call(&mut vars, &main_func_call));
+		let mut context = InterpreterContext {
+			vars: std::collections::HashMap::new(),
+		};
+		try!(self.execute_func_call(&mut context, &main_func_call));
 
 		Ok(())
 	}
 
-	fn type_from_value(value: Value, span: Span) -> Result<Type, String> {
-		match value {
-			Value::Array(t, _) => match t {
-				Some(array_type) => Ok(Type::ArrayType(
-					Box::new(array_type)
+	fn type_from_value(value: &Value, span: Span) -> Result<Type, String> {
+		match *value {
+			Value::Array(ref t, _) => match *t {
+				Some(ref array_type) => Ok(Type::ArrayType(
+					Box::new((*array_type).clone())
 				)),
 				None => Err(format!("Interpreter error: cannot deduce type for empty array, {:?}", span))
 			},
@@ -109,7 +114,8 @@ impl<'a> Interpreter<'a> {
 			Value::Char(_) => Ok(Type::CharType),
 			Value::String(_) => Ok(Type::StringType),
 			Value::Integer(_) => Ok(Type::IntType),
-			Value::Struct(t, _) => Ok(t),
+			Value::Struct(ref t, _) => Ok((*t).clone()),
+			Value::Reference(_, ref r) => Ok(Type::ReferenceType(Box::new(try!(Self::type_from_value(r, span))))),
 		}
 	}
 
@@ -136,25 +142,25 @@ impl<'a> Interpreter<'a> {
 		Ok(())
 	}
 
-	fn execute_block_statement(&self, vars: *mut InterpreterVars, block_statement: &'a BlockStatement) -> Result<Option<Value>, String> {
+	fn execute_block_statement(&'a self, context: *mut InterpreterContext<'a>, block_statement: &'a BlockStatement) -> Result<Option<Value>, String> {
 		match *block_statement {
-			BlockStatement::FuncCall(ref fc) => { try!(self.execute_func_call(vars, fc)); Ok(None) },
-			BlockStatement::VarDecl(ref vd) => { try!(self.execute_var_decl(vars, vd)); Ok(None) },
-			BlockStatement::VarAssignment(ref va) => { try!(self.execute_var_assignment(vars, va)); Ok(None) },
-			BlockStatement::If(ref i) => self.execute_if(vars, i),
-			BlockStatement::While(ref w) => self.execute_while(vars, w),
-			BlockStatement::ForIn(ref fi) => self.execute_forin(vars, fi),
-			BlockStatement::Return(ref r) => self.execute_return(vars, r),
+			BlockStatement::FuncCall(ref fc) => { try!(self.execute_func_call(context, fc)); Ok(None) },
+			BlockStatement::VarDecl(ref vd) => { try!(self.execute_var_decl(context, vd)); Ok(None) },
+			BlockStatement::VarAssignment(ref va) => { try!(self.execute_var_assignment(context, va)); Ok(None) },
+			BlockStatement::If(ref i) => self.execute_if(context, i),
+			BlockStatement::While(ref w) => self.execute_while(context, w),
+			BlockStatement::ForIn(ref fi) => self.execute_forin(context, fi),
+			BlockStatement::Return(ref r) => self.execute_return(context, r),
 		}
 	}
 
-	fn execute_forin(&self, vars: *mut InterpreterVars, forin_data: &ForInData) -> Result<Option<Value>, String> {
-		let coll_value = try!(self.value_from_expression(vars, &forin_data.collection));
+	fn execute_forin(&'a self, context: *mut InterpreterContext<'a>, forin_data: &'a ForInData) -> Result<Option<Value>, String> {
+		let coll_value = try!(self.value_from_expression(context, &forin_data.collection));
 		match coll_value {
 			Value::Array(t, a) => {
 				for elem in a {
 					unsafe {
-						(*vars).insert(
+						(*context).vars.insert(
 							forin_data.element_name.clone(),
 							Variable {
 								name: forin_data.element_name.clone(),
@@ -165,9 +171,9 @@ impl<'a> Interpreter<'a> {
 					}
 
 					for statement in &forin_data.statements {
-						if let Some(v) = try!(self.execute_block_statement(vars, statement)) {
+						if let Some(v) = try!(self.execute_block_statement(context, statement)) {
 							unsafe {
-								(*vars).remove(AsRef::<str>::as_ref(&forin_data.element_name[..]));
+								(*context).vars.remove(AsRef::<str>::as_ref(&forin_data.element_name[..]));
 							}
 
 							return Ok(Some(v))
@@ -175,14 +181,14 @@ impl<'a> Interpreter<'a> {
 					}
 
 					unsafe {
-						(*vars).remove(AsRef::<str>::as_ref(&forin_data.element_name[..]));
+						(*context).vars.remove(AsRef::<str>::as_ref(&forin_data.element_name[..]));
 					}
 				}
 			},
 			Value::String(s) => {
 				for c in s.chars() {
 					unsafe {
-						(*vars).insert(
+						(*context).vars.insert(
 							forin_data.element_name.clone(),
 							Variable {
 								name: forin_data.element_name.clone(),
@@ -193,9 +199,9 @@ impl<'a> Interpreter<'a> {
 					}
 
 					for statement in &forin_data.statements {
-						if let Some(v) = try!(self.execute_block_statement(vars, statement)) {
+						if let Some(v) = try!(self.execute_block_statement(context, statement)) {
 							unsafe {
-								(*vars).remove(AsRef::<str>::as_ref(&forin_data.element_name[..]));
+								(*context).vars.remove(AsRef::<str>::as_ref(&forin_data.element_name[..]));
 							}
 
 							return Ok(Some(v))
@@ -203,7 +209,7 @@ impl<'a> Interpreter<'a> {
 					}
 
 					unsafe {
-						(*vars).remove(AsRef::<str>::as_ref(&forin_data.element_name[..]));
+						(*context).vars.remove(AsRef::<str>::as_ref(&forin_data.element_name[..]));
 					}
 				}
 			},
@@ -213,19 +219,108 @@ impl<'a> Interpreter<'a> {
 		Ok(None)
 	}
 
-	fn execute_return(&self, vars: *mut InterpreterVars, return_data: &ReturnData) -> Result<Option<Value>, String> {
+	fn execute_return(&'a self, context: *mut InterpreterContext<'a>, return_data: &ReturnData) -> Result<Option<Value>, String> {
+		fn contains_local_ref(context: *mut InterpreterContext, e: &Expression) -> bool {
+			match *e {
+				Expression::StringLiteral(..) |
+				Expression::IntegerLiteral(..) |
+				Expression::BoolLiteral(..) |
+				Expression::CharLiteral(..) |
+				Expression::FuncCall(..) |
+				Expression::Addition(..) |
+				Expression::Substraction(..) |
+				Expression::Multiplication(..) |
+				Expression::Division(..) |
+				Expression::Modulo(..) |
+				Expression::Equality(..) |
+				Expression::Inequality(..) |
+				Expression::Concatenation(..) |
+				Expression::Count(..) => false,
+
+				Expression::Variable(ref v) => {
+					match **v.path.iter().next().unwrap() {
+						PathPart::IdentifierPathPart(ref ipp) => unsafe {
+							match (*context).vars.get(AsRef::<str>::as_ref(&ipp.identifier[..])) {
+								Some(ref var) => match var.value {
+									Value::Reference(ref p, _) => {
+										let fake_e = Expression::Variable(
+											Box::new(
+												VariableData {
+													span: ipp.span.clone(),
+													path: (*p).clone(),
+												}
+											)
+										);
+										contains_local_ref(context, &fake_e)
+									},
+									_ => false
+								},
+								None => false
+							}
+						},
+						_ => false
+					}
+				},
+
+				Expression::Reference(ref e, _) => {
+					match **e {
+						Expression::Variable(ref v) => {
+							match **v.path.iter().next().unwrap() {
+								PathPart::IdentifierPathPart(ref ipp) => unsafe {
+									(*context).vars.get(AsRef::<str>::as_ref(&ipp.identifier[..])).is_some()
+								},
+								_ => false
+							}
+						},
+						_ => false, // should never happen
+					}
+				},
+
+				Expression::Dereference(ref e, _) => {
+					match **e {
+						ref v @ Expression::Variable(_) => contains_local_ref(context, v),
+						Expression::FuncCall(_) => false,
+						_ => false, // should never happen
+					}
+				}
+
+				Expression::Array(ref a) => {
+					for item in &a.items {
+						if contains_local_ref(context, item) {
+							return true
+						}
+					};
+
+					false
+				},
+
+				Expression::StructInit(ref si) => {
+					for field in &si.fields {
+						if contains_local_ref(context, &field.value) {
+							return true
+						}
+					};
+
+					false
+				},
+			}
+		}
+
 		match return_data.expected_type {
 			Some(ref t) => {
 				let span: Span;
 				let value = match return_data.value {
 					Some(ref e) => {
 						span = Span::from_expression(e);
-						try!(self.value_from_expression(vars, e))
+						if contains_local_ref(context, e) {
+							return Err(format!("Interpreter error: returning reference to local variable, {:?}", span))
+						};
+						try!(self.value_from_expression(context, e))
 					},
 					None => return Err(format!("Interpreter error: expected expression for return statement, {:?}", return_data.span)),
 				};
 
-				let value_type = try!(Self::type_from_value(value.clone(), span.clone()));
+				let value_type = try!(Self::type_from_value(&value, span.clone()));
 				if value_type != *t {
 					return Err(format!("Interpreter error: mismatched types in return statement (got {:?} expected {:?}), {:?}", value_type, *t, span))
 				}
@@ -242,7 +337,7 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn execute_func_call(&self, vars: *mut InterpreterVars, func_call_data: &FuncCallData) -> Result<Option<Value>, String> {
+	fn execute_func_call<'b>(&'b self, context: *mut InterpreterContext<'b>, func_call_data: &FuncCallData) -> Result<Option<Value>, String> {
 		fn is_builtin_func(path: &Path, name: &str) -> bool {
 			if path.len() == 1 {
 				match **path.get(0).unwrap() {
@@ -255,7 +350,7 @@ impl<'a> Interpreter<'a> {
 		}
 
 		if is_builtin_func(&func_call_data.path, "println") {
-			self.builtin_println(vars, func_call_data)
+			self.builtin_println(context, func_call_data)
 		} else if is_builtin_func(&func_call_data.path, "readln") {
 			self.builtin_readln(func_call_data)
 		} else {
@@ -303,6 +398,10 @@ impl<'a> Interpreter<'a> {
 				}
 			};
 
+			let mut local_context = InterpreterContext {
+				vars: std::collections::HashMap::new(),
+			};
+
 			let mut param_count = 0;
 			for param in &func_decl.parameters {
 				let variable = Variable {
@@ -310,9 +409,9 @@ impl<'a> Interpreter<'a> {
 					var_type: param.param_type.clone(),
 					value: {
 						if param_count < func_call_data.arguments.len() {
-							let value = try!(self.value_from_expression(vars, &func_call_data.arguments.get(param_count).unwrap().value));
+							let value = try!(self.value_from_expression(context, &func_call_data.arguments.get(param_count).unwrap().value));
 
-							let value_type = try!(Self::type_from_value(value.clone(), Span::from_expression(&func_call_data.arguments.get(param_count).unwrap().value)));
+							let value_type = try!(Self::type_from_value(&value, Span::from_expression(&func_call_data.arguments.get(param_count).unwrap().value)));
 
 							if value_type != param.param_type {
 								return Err(format!("Interpreter error: mismatched types in function call (got {:?} expected {:?}), {:?}", value_type, param.param_type, Span::from_expression(&func_call_data.arguments.get(param_count).unwrap().value)))
@@ -321,9 +420,9 @@ impl<'a> Interpreter<'a> {
 							}
 						} else {
 							if let Some(ref e) = param.default_value {
-								let value = try!(self.value_from_expression(vars, e));
+								let value = try!(self.value_from_expression(context, e));
 
-								let value_type = try!(Self::type_from_value(value.clone(), Span::from_expression(e)));
+								let value_type = try!(Self::type_from_value(&value, Span::from_expression(e)));
 
 								if value_type != param.param_type {
 									return Err(format!("Interpreter error: mismatched types in function declaration default value (got {:?} expected {:?}), {:?}", value_type, param.param_type, Span::from_expression(e)))
@@ -337,12 +436,10 @@ impl<'a> Interpreter<'a> {
 					}
 				};
 
-				unsafe {
-					(*vars).insert(
-						param.name.clone(),
-						variable
-					);
-				}
+				local_context.vars.insert(
+					param.name.clone(),
+					variable
+				);
 
 				param_count += 1;
 			}
@@ -354,7 +451,7 @@ impl<'a> Interpreter<'a> {
 					local_vars.push(vd.name.clone());
 				};
 
-				match try!(self.execute_block_statement(vars, statement)) {
+				match try!(self.execute_block_statement(&mut local_context, statement)) {
 					Some(v) => {
 						return_value = Some(v);
 						break
@@ -363,28 +460,16 @@ impl<'a> Interpreter<'a> {
 				}
 			}
 
-			for local_var in &local_vars {
-				unsafe {
-					(*vars).remove(AsRef::<str>::as_ref(&local_var[..]));
-				}
-			}
-
-			for param in &func_decl.parameters {
-				unsafe {
-					(*vars).remove(AsRef::<str>::as_ref(&param.name[..]));
-				}
-			}
-
 			Ok(return_value)
 		}
 	}
 
-	fn execute_var_decl(&self, vars: *mut InterpreterVars, var_decl_data: &'a VarDeclData) -> Result<(), String> {
+	fn execute_var_decl(&'a self, context: *mut InterpreterContext<'a>, var_decl_data: &'a VarDeclData) -> Result<(), String> {
 		let span: Span;
 		let value = match var_decl_data.value {
 			Some(ref v) => {
 				span = Span::from_expression(v);
-				try!(self.value_from_expression(vars, v))
+				try!(self.value_from_expression(context, v))
 			},
 			None => {
 				span = var_decl_data.span.clone();
@@ -393,13 +478,13 @@ impl<'a> Interpreter<'a> {
 		};
 
 		unsafe {
-			(*vars).insert(
+			(*context).vars.insert(
 				var_decl_data.name.clone(),
 				Variable {
 					name: var_decl_data.name.clone(),
 					var_type: var_decl_data.var_type.clone(),
 					value: {
-						let value_type = try!(Self::type_from_value(value.clone(), span.clone()));
+						let value_type = try!(Self::type_from_value(&value, span.clone()));
 
 						if value_type != var_decl_data.var_type {
 							return Err(format!("Interpreter error: mismatched types in var initialization (got {:?} expected {:?}), {:?}", value_type, var_decl_data.var_type, span))
@@ -414,13 +499,13 @@ impl<'a> Interpreter<'a> {
 		Ok(())
 	}
 
-	fn execute_var_assignment(&self, vars: *mut InterpreterVars, var_assignment_data: &VarAssignmentData) -> Result<(), String> {
-		let value = try!(self.value_from_expression(vars, &var_assignment_data.value));
+	fn execute_var_assignment(&'a self, context: *mut InterpreterContext<'a>, var_assignment_data: &VarAssignmentData) -> Result<(), String> {
+		let value = try!(self.value_from_expression(context, &var_assignment_data.value));
 
 		let mut path = var_assignment_data.path.iter();
 
 		let mut current_ref = match **path.next().unwrap() {
-			PathPart::IdentifierPathPart(ref ipp) => unsafe { match (*vars).get_mut(AsRef::<str>::as_ref(&ipp.identifier[..])) {
+			PathPart::IdentifierPathPart(ref ipp) => unsafe { match (*context).vars.get_mut(AsRef::<str>::as_ref(&ipp.identifier[..])) {
 				Some(cr) => &mut cr.value,
 				None => return Err(format!("Interpreter error: unknown variable, {:?}", ipp.span)),
 			} },
@@ -447,7 +532,7 @@ impl<'a> Interpreter<'a> {
 				PathPart::IndexPathPart(ref ipp) => {
 					match ipp.index {
 						Some(ref expr) => {
-							let index_value = try!(self.value_from_expression(vars, expr));
+							let index_value = try!(self.value_from_expression(context, expr));
 							match index_value {
 								Value::Integer(i) => {
 									let cell = match *{current_ref} {
@@ -489,8 +574,8 @@ impl<'a> Interpreter<'a> {
 			}
 		};
 
-		let value_type = Self::type_from_value(value.clone(), Span::from_expression(&var_assignment_data.value));
-		let current_type = Self::type_from_value((*current_ref).clone(), var_assignment_data.span.clone());
+		let value_type = Self::type_from_value(&value, Span::from_expression(&var_assignment_data.value));
+		let current_type = Self::type_from_value(current_ref, var_assignment_data.span.clone());
 
 		if value_type != current_type {
 			return Err(format!("Interpreter error: mismatched types in var assignment (got {:?} expected {:?}), {:?}", value_type, current_type, Span::from_expression(&var_assignment_data.value)))
@@ -501,18 +586,18 @@ impl<'a> Interpreter<'a> {
 		Ok(())
 	}
 
-	fn execute_if(&self, vars: *mut InterpreterVars, if_data: &'a IfData) -> Result<Option<Value>, String> {
-		match try!(self.value_from_expression(vars, &if_data.condition)) {
+	fn execute_if(&'a self, context: *mut InterpreterContext<'a>, if_data: &'a IfData) -> Result<Option<Value>, String> {
+		match try!(self.value_from_expression(context, &if_data.condition)) {
 			Value::Bool(b) => {
 				if b {
 					for statement in &if_data.if_statements {
-						if let Some(v) = try!(self.execute_block_statement(vars, statement)) {
+						if let Some(v) = try!(self.execute_block_statement(context, statement)) {
 							return Ok(Some(v))
 						}
 					}
 				} else if let Some(ref else_statements) = if_data.else_statements {
 					for statement in else_statements {
-						if let Some(v) = try!(self.execute_block_statement(vars, statement)) {
+						if let Some(v) = try!(self.execute_block_statement(context, statement)) {
 							return Ok(Some(v))
 						}
 					}
@@ -523,13 +608,13 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn execute_while(&self, vars: *mut InterpreterVars, while_data: &'a WhileData) -> Result<Option<Value>, String> {
+	fn execute_while(&'a self, context: *mut InterpreterContext<'a>, while_data: &'a WhileData) -> Result<Option<Value>, String> {
 		loop {
-			match try!(self.value_from_expression(vars, &while_data.condition)) {
+			match try!(self.value_from_expression(context, &while_data.condition)) {
 				Value::Bool(b) => {
 					if b {
 						for statement in &while_data.statements {
-							if let Some(v) = try!(self.execute_block_statement(vars, statement)) {
+							if let Some(v) = try!(self.execute_block_statement(context, statement)) {
 								return Ok(Some(v))
 							}
 						}
@@ -542,7 +627,7 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn value_from_expression(&self, vars: *mut InterpreterVars, expression: &Expression) -> Result<Value, String> {
+	fn value_from_expression<'b>(&'b self, context: *mut InterpreterContext<'b>, expression: &Expression) -> Result<Value, String> {
 		match *expression {
 			Expression::StringLiteral(ref sl) => Ok(Value::String(sl.value.clone())),
 			Expression::IntegerLiteral(ref il) => Ok(Value::Integer(il.value)),
@@ -553,7 +638,7 @@ impl<'a> Interpreter<'a> {
 
 				let mut current_ref = match **path.next().unwrap() {
 					PathPart::IdentifierPathPart(ref ipp) =>
-					unsafe { match (*vars).get(AsRef::<str>::as_ref(&ipp.identifier[..])) {
+					unsafe { match (*context).vars.get(AsRef::<str>::as_ref(&ipp.identifier[..])) {
 						Some(ref cr) => &cr.value,
 						None => return Err(format!("Interpreter error: unknown variable, {:?}", ipp.span)),
 					} },
@@ -580,7 +665,7 @@ impl<'a> Interpreter<'a> {
 						PathPart::IndexPathPart(ref ipp) => {
 							match ipp.index {
 								Some(ref expr) => {
-									let index_value = try!(self.value_from_expression(vars, expr));
+									let index_value = try!(self.value_from_expression(context, expr));
 									match index_value {
 										Value::Integer(i) => {
 											let cell = match *{current_ref} {
@@ -596,7 +681,7 @@ impl<'a> Interpreter<'a> {
 										_ => return Err(format!("Interpreter error: invalid index type for array, {:?}", Span::from_expression(expr)))
 									}
 								},
-								None => return Err(format!("Interpreter error: arrray expression requires an index, {:?}", ipp.span))
+								None => return Err(format!("Interpreter error: array expression requires an index, {:?}", ipp.span))
 							}
 
 							is_field = false;
@@ -611,8 +696,8 @@ impl<'a> Interpreter<'a> {
 				let mut values: std::vec::Vec<Value> = vec![];
 				let mut array_type: Option<Type> = None;
 				for item in &a.items {
-					let value = try!(self.value_from_expression(vars, item));
-					let value_type = try!(Self::type_from_value(value.clone(), Span::from_expression(item)));
+					let value = try!(self.value_from_expression(context, item));
+					let value_type = try!(Self::type_from_value(&value, Span::from_expression(item)));
 					match array_type {
 						Some(ref t) => if value_type != *t {
 							return Err(format!("Interpreter error: heterogeneous types in array literal, {:?}", a.span))
@@ -691,8 +776,8 @@ impl<'a> Interpreter<'a> {
 
 					for new_field in &si.fields {
 						if field.name == new_field.name {
-							let value = try!(self.value_from_expression(vars, &new_field.value));
-							let value_type = try!(Self::type_from_value(value.clone(), Span::from_expression(&new_field.value)));
+							let value = try!(self.value_from_expression(context, &new_field.value));
+							let value_type = try!(Self::type_from_value(&value, Span::from_expression(&new_field.value)));
 
 							if field.field_type != value_type {
 								return Err(format!("Interpreter error: mismatched types in struct init (got {:?} expected {:?}), {:?}", value_type, field.field_type, Span::from_expression(&new_field.value)))
@@ -719,25 +804,97 @@ impl<'a> Interpreter<'a> {
 				))
 			}
 			Expression::FuncCall(ref fc) => {
-				match try!(self.execute_func_call(vars, fc)) {
+				match try!(self.execute_func_call(context, fc)) {
 					Some(v) => Ok(v),
 					None => return Err(format!("Interpreter error: func call in expression must return something, {:?}", fc.span)),
 				}
 			},
-			Expression::Count(ref e, ref s) => {
-				match try!(self.value_from_expression(vars, e)) {
+			Expression::Count(ref e, ref sp) => {
+				match try!(self.value_from_expression(context, e)) {
 					Value::Array(_, ref a) => Ok(Value::Integer(a.len() as i64)),
 					Value::String(ref s) => Ok(Value::Integer(s.len() as i64)),
-					_ => return Err(format!("Interpreter error: can't get count on non-(array/string), {:?}", *s))
+					_ => return Err(format!("Interpreter error: can't get count on non-(array/string), {:?}", *sp))
 				}
 			},
+			Expression::Reference(ref e, ref s) => {
+				match **e {
+					Expression::Variable(ref v) => {
+						let mut path = v.path.iter();
+
+						let mut current_ref = match **path.next().unwrap() {
+							PathPart::IdentifierPathPart(ref ipp) =>
+							unsafe { match (*context).vars.get(AsRef::<str>::as_ref(&ipp.identifier[..])) {
+								Some(ref cr) => &cr.value,
+								None => return Err(format!("Interpreter error: unknown variable, {:?}", ipp.span)),
+							} },
+							_ => return Err(format!("Interpreter error: incorrect var path, {:?}", v.span))
+						};
+
+						let mut is_field = false;
+						for path_part in path {
+							match **path_part {
+								PathPart::FieldPathPart if !is_field => is_field = true,
+								PathPart::IdentifierPathPart(ref ipp) if is_field => {
+									let current_map = match *{current_ref} {
+										Value::Struct(_, ref map) => map,
+										_ => return Err(format!("Interpreter error: cannot access field on non-struct, {:?}", ipp.span))
+									};
+
+									current_ref = match current_map.get(&ipp.identifier) {
+										Some(cr) => cr,
+										None => return Err(format!("Interpreter error: unknown struct field, {:?}", ipp.span)),
+									};
+
+									is_field = false;
+								},
+								PathPart::IndexPathPart(ref ipp) => {
+									match ipp.index {
+										Some(ref expr) => {
+											let index_value = try!(self.value_from_expression(context, expr));
+											match index_value {
+												Value::Integer(i) => {
+													let cell = match *{current_ref} {
+														Value::Array(_, ref a) => match a.get(i as usize) {
+															Some(v) => v,
+															None => return Err(format!("Interpreter error: index out of bounds, {:?}", Span::from_expression(expr))),
+														},
+														_ => return Err(format!("Interpreter error: can't access index on non-array, {:?}", ipp.span))
+													};
+
+													current_ref = cell;
+												},
+												_ => return Err(format!("Interpreter error: invalid index type for array, {:?}", Span::from_expression(expr)))
+											}
+										},
+										None => return Err(format!("Interpreter error: array expression requires an index, {:?}", ipp.span))
+									}
+
+									is_field = false;
+								},
+								_ => return Err(format!("Interpreter error: invalid path for reference, {:?}", v.span)),
+							}
+						};
+
+						Ok(Value::Reference(v.path.clone(), current_ref))
+					},
+					_ => return Err(format!("Interpreter error: can't reference non(variable/field), {:?}", *s))
+				}
+			},
+			Expression::Dereference(ref e, ref s) => {
+				let deref_value = match try!(self.value_from_expression(context, e)) {
+					Value::Reference(_, v) => (*v).clone(),
+					_ => return Err(format!("Interpreter error: cannot dereference non-reference, {:?}", (*s).clone()))
+				};
+
+				Ok(deref_value)
+			},
 			Expression::Addition(ref e1, ref e2) => {
-				let integer1 = match try!(self.value_from_expression(vars, e1)) {
+				let integer1 = match try!(self.value_from_expression(context, e1)) {
 					Value::Integer(i) => i,
 					other => return Err(format!("Interpreter error: incorrect expression for addition: {:?}, {:?}", other, Span::from_expression(e1)))
 				};
 
-				let integer2 = match try!(self.value_from_expression(vars, e2)) {
+				let integer2 = match try!(self.value_from_expression(context, e2)) {
 					Value::Integer(i) => i,
 					other => return Err(format!("Interpreter error: incorrect expression for addition: {:?}, {:?}", other, Span::from_expression(e2)))
 				};
@@ -745,12 +902,12 @@ impl<'a> Interpreter<'a> {
 				Ok(Value::Integer(integer1 + integer2))
 			},
 			Expression::Substraction(ref e1, ref e2) => {
-				let integer1 = match try!(self.value_from_expression(vars, e1)) {
+				let integer1 = match try!(self.value_from_expression(context, e1)) {
 					Value::Integer(i) => i,
 					other => return Err(format!("Interpreter error: incorrect expression for substraction: {:?}, {:?}", other, Span::from_expression(e1)))
 				};
 
-				let integer2 = match try!(self.value_from_expression(vars, e2)) {
+				let integer2 = match try!(self.value_from_expression(context, e2)) {
 					Value::Integer(i) => i,
 					other => return Err(format!("Interpreter error: incorrect expression for substraction: {:?}, {:?}", other, Span::from_expression(e2)))
 				};
@@ -758,12 +915,12 @@ impl<'a> Interpreter<'a> {
 				Ok(Value::Integer(integer1 - integer2))
 			},
 			Expression::Multiplication(ref e1, ref e2) => {
-				let integer1 = match try!(self.value_from_expression(vars, e1)) {
+				let integer1 = match try!(self.value_from_expression(context, e1)) {
 					Value::Integer(i) => i,
 					other => return Err(format!("Interpreter error: incorrect expression for multiplication: {:?}, {:?}", other, Span::from_expression(e1)))
 				};
 
-				let integer2 = match try!(self.value_from_expression(vars, e2)) {
+				let integer2 = match try!(self.value_from_expression(context, e2)) {
 					Value::Integer(i) => i,
 					other => return Err(format!("Interpreter error: incorrect expression for multiplication: {:?}, {:?}", other, Span::from_expression(e2)))
 				};
@@ -771,12 +928,12 @@ impl<'a> Interpreter<'a> {
 				Ok(Value::Integer(integer1 * integer2))
 			},
 			Expression::Division(ref e1, ref e2) => {
-				let integer1 = match try!(self.value_from_expression(vars, e1)) {
+				let integer1 = match try!(self.value_from_expression(context, e1)) {
 					Value::Integer(i) => i,
 					other => return Err(format!("Interpreter error: incorrect expression for division: {:?}, {:?}", other, Span::from_expression(e1)))
 				};
 
-				let integer2 = match try!(self.value_from_expression(vars, e2)) {
+				let integer2 = match try!(self.value_from_expression(context, e2)) {
 					Value::Integer(i) => i,
 					other => return Err(format!("Interpreter error: incorrect expression for division: {:?}, {:?}", other, Span::from_expression(e2)))
 				};
@@ -784,12 +941,12 @@ impl<'a> Interpreter<'a> {
 				Ok(Value::Integer(integer1 / integer2))
 			},
 			Expression::Modulo(ref e1, ref e2) => {
-				let integer1 = match try!(self.value_from_expression(vars, e1)) {
+				let integer1 = match try!(self.value_from_expression(context, e1)) {
 					Value::Integer(i) => i,
 					other => return Err(format!("Interpreter error: incorrect expression for modulo: {:?}, {:?}", other, Span::from_expression(e1)))
 				};
 
-				let integer2 = match try!(self.value_from_expression(vars, e2)) {
+				let integer2 = match try!(self.value_from_expression(context, e2)) {
 					Value::Integer(i) => i,
 					other => return Err(format!("Interpreter error: incorrect expression for modulo: {:?}, {:?}", other, Span::from_expression(e2)))
 				};
@@ -797,24 +954,24 @@ impl<'a> Interpreter<'a> {
 				Ok(Value::Integer(integer1 % integer2))
 			},
 			Expression::Equality(ref e1, ref e2) => {
-				let value1 = self.value_from_expression(vars, e1);
-				let value2 = self.value_from_expression(vars, e2);
+				let value1 = self.value_from_expression(context, e1);
+				let value2 = self.value_from_expression(context, e2);
 
 				Ok(Value::Bool(value1 == value2))
 			},
 			Expression::Inequality(ref e1, ref e2) => {
-				let value1 = self.value_from_expression(vars, e1);
-				let value2 = self.value_from_expression(vars, e2);
+				let value1 = self.value_from_expression(context, e1);
+				let value2 = self.value_from_expression(context, e2);
 
 				Ok(Value::Bool(value1 != value2))
 			},
 			Expression::Concatenation(ref e1, ref e2) => {
-				let string1 = match try!(self.value_from_expression(vars, e1)) {
+				let string1 = match try!(self.value_from_expression(context, e1)) {
 					Value::String(s) => s,
 					other => return Err(format!("Interpreter error: incorrect expression for concatenation: {:?}, {:?}", other, Span::from_expression(e1)))
 				};
 
-				let string2 = match try!(self.value_from_expression(vars, e2)) {
+				let string2 = match try!(self.value_from_expression(context, e2)) {
 					Value::String(s) => s,
 					other => return Err(format!("Interpreter error: incorrect expression for concatenation: {:?}, {:?}", other, Span::from_expression(e2)))
 				};
@@ -827,18 +984,19 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn builtin_println(&self, vars: *mut InterpreterVars, func_call_data: &FuncCallData) -> Result<Option<Value>, String> {
+	fn builtin_println(&'a self, context: *mut InterpreterContext<'a>, func_call_data: &FuncCallData) -> Result<Option<Value>, String> {
 		if func_call_data.arguments.len() != 1 {
 			return Err(format!("Interpreter error: invalid argument count for println, {:?}", func_call_data.span))
 		};
 
-		match try!(self.value_from_expression(vars, &func_call_data.arguments[0].value)) {
+		match try!(self.value_from_expression(context, &func_call_data.arguments[0].value)) {
 			Value::String(s) => println!("{}", s),
 			Value::Integer(i) => println!("{}", i),
 			Value::Bool(b) => println!("{}", b),
 			Value::Char(c) => println!("{}", c),
 			Value::Struct(_, s) => println!("{:?}", s),
 			Value::Array(_, a) => println!("{:?}", a),
+			Value::Reference(p, _) => println!("{:?}", p),
 		};
 
 		Ok(None)
@@ -919,6 +1077,7 @@ impl<'a> Interpreter<'a> {
 
 				Ok(Value::Struct(var_type.clone(), fields))
 			},
+			Type::ReferenceType(_) => Err(format!("Interpreter error: no default value for references, {:?}", span))
 		}
 	}
 }

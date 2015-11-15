@@ -49,23 +49,31 @@ impl<'a> Parser<'a> {
 		Ok(&self.ast)
 	}
 
-	fn precedence_for_token(token: Token) -> u8 {
+	fn precedence_for_token(token: Token, unary: bool) -> u8 {
 		match token {
 			Token::Symbol(s) => {
-				match s {
-					Symbol::EqualEqual |
-					Symbol::NotEqual => 1,
-					Symbol::Plus |
-					Symbol::Minus |
-					Symbol::Concat => 2,
-					Symbol::Times |
-					Symbol::Over |
-					Symbol::Modulo => 3,
-					Symbol::Hash => 4,
-					_ => 0
+				if unary {
+					match s {
+						Symbol::Star |
+						Symbol::Hash |
+						Symbol::Amp => 4,
+						_ => 0
+					}
+				} else {
+					match s {
+						Symbol::EqualEqual |
+						Symbol::NotEqual => 1,
+						Symbol::Plus |
+						Symbol::Minus |
+						Symbol::Concat => 2,
+						Symbol::Star |
+						Symbol::Over |
+						Symbol::Modulo => 3,
+						_ => 0
+					}
 				}
 			},
-			_ => 0
+			_ => 0,
 		}
 	}
 
@@ -521,7 +529,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Plus))))
+							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Plus), false)))
 						)
 					)
 				} else if try!(self.accept(Token::Symbol(Symbol::Minus))).is_some() {
@@ -530,16 +538,16 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Minus))))
+							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Minus), false)))
 						)
 					)
-				} else if try!(self.accept(Token::Symbol(Symbol::Times))).is_some() {
+				} else if try!(self.accept(Token::Symbol(Symbol::Star))).is_some() {
 					Expression::Multiplication(
 						Box::new(
 							expr
 						),
 						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Times))))
+							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Star), false)))
 						)
 					)
 				} else if try!(self.accept(Token::Symbol(Symbol::Over))).is_some() {
@@ -548,7 +556,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Over))))
+							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Over), false)))
 						)
 					)
 				} else if try!(self.accept(Token::Symbol(Symbol::Modulo))).is_some() {
@@ -557,7 +565,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Modulo))))
+							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Modulo), false)))
 						)
 					)
 				} else if try!(self.accept(Token::Symbol(Symbol::EqualEqual))).is_some() {
@@ -566,7 +574,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::EqualEqual))))
+							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::EqualEqual), false)))
 						)
 					)
 				} else if try!(self.accept(Token::Symbol(Symbol::NotEqual))).is_some() {
@@ -575,7 +583,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::NotEqual))))
+							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::NotEqual), false)))
 						)
 					)
 				} else if try!(self.accept(Token::Symbol(Symbol::Concat))).is_some() {
@@ -584,7 +592,7 @@ impl<'a> Parser<'a> {
 							expr
 						),
 						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Concat))))
+							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Concat), false)))
 						)
 					)
 				} else {
@@ -600,9 +608,30 @@ impl<'a> Parser<'a> {
 				} else if let Some(h) = try!(self.accept(Token::Symbol(Symbol::Hash))) {
 					Expression::Count(
 						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Hash))))
+							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Hash), true)))
 						),
 						h.sp
+					)
+				} else if let Some(a) = try!(self.accept(Token::Symbol(Symbol::Amp))) {
+					Expression::Reference(
+						Box::new(
+							match try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Amp), true))) {
+								v @ Expression::Variable(_) => v,
+								e => return Err(format!("Parser error: can't reference a non-variable, {:?}", Span::concat(a.sp, Span::from_expression(&e))))
+							}
+						),
+						a.sp
+					)
+				} else if let Some(s) = try!(self.accept(Token::Symbol(Symbol::Star))) {
+					Expression::Dereference(
+						Box::new(
+							match try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Star), true))) {
+								v @ Expression::Variable(_) => v,
+								fc @ Expression::FuncCall(_) => fc,
+								e => return Err(format!("Parser error: can't dereference a non-(variable/funccall), {:?}", Span::concat(s.sp, Span::from_expression(&e))))
+							}
+						),
+						s.sp
 					)
 				} else if let Some(lb) = try!(self.accept(Token::Symbol(Symbol::LeftBracket))) {
 					let mut items: std::vec::Vec<Expression> = vec![];
@@ -838,7 +867,7 @@ impl<'a> Parser<'a> {
 			},
 		};
 
-		if Self::precedence_for_token(self.current_token.tok.clone()) > minimum_precedence {
+		if Self::precedence_for_token(self.current_token.tok.clone(), false) > minimum_precedence{
 			self.parse_expression_rec(Some(new_expr), minimum_precedence)
 		} else {
 			Ok(new_expr)
@@ -904,7 +933,11 @@ impl<'a> Parser<'a> {
 			}
 		}
 
-		if try!(self.accept(Token::Symbol(Symbol::LeftBracket))).is_some() {
+		if try!(self.accept(Token::Symbol(Symbol::Amp))).is_some() {
+			return Ok(Type::ReferenceType(
+				Box::new(try!(self.parse_type()))
+			))
+		} else if try!(self.accept(Token::Symbol(Symbol::LeftBracket))).is_some() {
 			try!(self.expect(Token::Symbol(Symbol::RightBracket)));
 			let inner_type = try!(self.parse_type());
 
