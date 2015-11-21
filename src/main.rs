@@ -24,7 +24,7 @@ fn main() {
     let mut s = String::new();
     let res = file.read_to_string(&mut s);
     if let Some(err) = res.err() {
-        panic!(err)
+        println!("{}", err)
     }
 
     let mut reader = lexer::Reader::new(s.as_ref());
@@ -32,13 +32,13 @@ fn main() {
     let mut parser = parser::Parser::new(&mut reader);
     let ast_res = parser.parse();
     if let Some(err) = ast_res.clone().err() {
-        panic!(err)
+        println!("{}", err)
     }
     let ast = ast_res.ok().unwrap();
 
     let mut interpreter = interpreter::Interpreter::new(ast);
     let res2 = interpreter.execute();
     if let Some(err) = res2.err() {
-        panic!(err)
+        println!("{}", err)
     }
 }

@@ -46,6 +46,7 @@ pub enum Symbol {
     Concat,
     Return,
     Amp,
+    At,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -54,7 +55,7 @@ pub struct SToken {
     pub sp: Span,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub struct Span {
     pub scol: i32,
     pub srow: i32,
@@ -69,6 +70,15 @@ impl Span {
             srow: sp1.srow,
             ecol: sp2.ecol,
             erow: sp2.erow,
+        }
+    }
+
+    pub fn nil_span() -> Span {
+        Span {
+            scol: 0,
+            srow: 0,
+            ecol: 0,
+            erow: 0,
         }
     }
 }
@@ -309,6 +319,7 @@ impl<'a> Reader<'a> {
             '{' => Ok(Token::Symbol(Symbol::LeftBrace)),
             '}' => Ok(Token::Symbol(Symbol::RightBrace)),
             '&' => Ok(Token::Symbol(Symbol::Amp)),
+            '@' => Ok(Token::Symbol(Symbol::At)),
             '\n' => {
                 self.current_col = 0;
                 self.current_row += 1;

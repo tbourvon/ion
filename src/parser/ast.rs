@@ -1,5 +1,6 @@
 use std;
 use lexer::Span;
+use std::hash::*;
 
 #[derive(Debug, Clone)]
 pub struct Ast {
@@ -34,27 +35,27 @@ pub struct PackageData {
 	pub name: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FuncDeclData {
 	pub span: Span,
 	pub name: String,
-	pub return_type: Option<Type>,
+	pub return_type: Type,
 	pub parameters: std::vec::Vec<Box<FuncDeclParamData>>,
 	pub statements: std::vec::Vec<BlockStatement>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockStatement {
-	FuncCall(Box<FuncCallData>),
+	Expression(Box<Expression>),
 	VarDecl(Box<VarDeclData>),
-	VarAssignment(Box<VarAssignmentData>),
+	VarAssignment(Box<Expression>, Box<Expression>),
 	If(Box<IfData>),
 	While(Box<WhileData>),
 	Return(Box<ReturnData>),
 	ForIn(Box<ForInData>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ForInData {
 	pub span: Span,
 	pub element_name: String,
@@ -62,14 +63,14 @@ pub struct ForInData {
 	pub statements: std::vec::Vec<BlockStatement>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReturnData {
 	pub span: Span,
 	pub value: Option<Expression>,
-	pub expected_type: Option<Type>,
+	pub expected_type: Type,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IfData {
 	pub span: Span,
 	pub condition: Expression,
@@ -77,28 +78,14 @@ pub struct IfData {
 	pub else_statements: Option<std::vec::Vec<BlockStatement>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WhileData {
 	pub span: Span,
 	pub condition: Expression,
 	pub statements: std::vec::Vec<BlockStatement>,
 }
 
-#[derive(Debug, Clone)]
-pub struct VarAssignmentData {
-	pub span: Span,
-	pub path: Path,
-	pub value: Expression,
-}
-
 #[derive(Debug, Clone, PartialEq)]
-pub struct FuncCallData {
-	pub span: Span,
-	pub path: Path,
-	pub arguments: std::vec::Vec<Box<FuncCallArgData>>,
-}
-
-#[derive(Debug, Clone)]
 pub struct VarDeclData {
 	pub span: Span,
 	pub name: String,
@@ -107,12 +94,6 @@ pub struct VarDeclData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FuncCallArgData {
-	pub span: Span,
-	pub value: Expression,
-}
-
-#[derive(Debug, Clone)]
 pub struct FuncDeclParamData {
 	pub span: Span,
 	pub name: String,
@@ -122,18 +103,16 @@ pub struct FuncDeclParamData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
+	NoType,
 	ReferenceType(Box<Type>),
+	MutReferenceType(Box<Type>),
 	ArrayType(Box<Type>),
-	StructType(Box<StructTypeData>),
+	StructType(Path),
+	FuncType(Box<Type>, std::vec::Vec<Box<Type>>),
 	StringType,
 	IntType,
 	BoolType,
 	CharType,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct StructTypeData {
-	pub path: Path,
 }
 
 #[derive(Debug, Clone)]
@@ -152,122 +131,96 @@ pub struct StructFieldData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Expression {
-	StringLiteral(Box<StringLiteralData>),
-	IntegerLiteral(Box<IntegerLiteralData>),
-	BoolLiteral(Box<BoolLiteralData>),
-	CharLiteral(Box<CharLiteralData>),
-	Variable(Box<VariableData>),
-	StructInit(Box<StructInitData>),
-	Array(Box<ArrayData>),
-	FuncCall(Box<FuncCallData>),
-	Reference(Box<Expression>, Span),
-	Dereference(Box<Expression>, Span),
-	Addition(Box<Expression>, Box<Expression>),
-	Substraction(Box<Expression>, Box<Expression>),
-	Multiplication(Box<Expression>, Box<Expression>),
-	Division(Box<Expression>, Box<Expression>),
-	Modulo(Box<Expression>, Box<Expression>),
-	Equality(Box<Expression>, Box<Expression>),
-	Inequality(Box<Expression>, Box<Expression>),
-	Concatenation(Box<Expression>, Box<Expression>),
-	Count(Box<Expression>, Span),
-}
-
-impl Span {
-	pub fn from_expression(e: &Expression) -> Span {
-		match *e {
-			Expression::StringLiteral(ref sl) => sl.span.clone(),
-			Expression::IntegerLiteral(ref il) => il.span.clone(),
-			Expression::BoolLiteral(ref bl) => bl.span.clone(),
-			Expression::CharLiteral(ref cl) => cl.span.clone(),
-			Expression::Variable(ref v) => v.span.clone(),
-			Expression::StructInit(ref si) => si.span.clone(),
-			Expression::Array(ref a) => a.span.clone(),
-			Expression::FuncCall(ref fc) => fc.span.clone(),
-			Expression::Reference(ref e, ref s) => Span::concat((*s).clone(), Span::from_expression(e)),
-			Expression::Dereference(ref e, ref s) => Span::concat((*s).clone(), Span::from_expression(e)),
-			Expression::Addition(ref e1, ref e2) => Span::concat(Span::from_expression(e1), Span::from_expression(e2)),
-			Expression::Substraction(ref e1, ref e2) => Span::concat(Span::from_expression(e1), Span::from_expression(e2)),
-			Expression::Multiplication(ref e1, ref e2) => Span::concat(Span::from_expression(e1), Span::from_expression(e2)),
-			Expression::Division(ref e1, ref e2) => Span::concat(Span::from_expression(e1), Span::from_expression(e2)),
-			Expression::Modulo(ref e1, ref e2) => Span::concat(Span::from_expression(e1), Span::from_expression(e2)),
-			Expression::Equality(ref e1, ref e2) => Span::concat(Span::from_expression(e1), Span::from_expression(e2)),
-			Expression::Inequality(ref e1, ref e2) => Span::concat(Span::from_expression(e1), Span::from_expression(e2)),
-			Expression::Concatenation(ref e1, ref e2) => Span::concat(Span::from_expression(e1), Span::from_expression(e2)),
-			Expression::Count(ref c, ref s) => Span::concat((*s).clone(), Span::from_expression(c)),
-		}
-	}
+pub struct Expression {
+	pub expr: Expression_,
+	pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct StructInitData {
-	pub span: Span,
-	pub path: Path,
-	pub fields: std::vec::Vec<Box<StructInitFieldData>>,
+pub enum Expression_ {
+	StringLiteral(String),
+	IntegerLiteral(i64),
+	BoolLiteral(bool),
+	CharLiteral(char),
+	Variable(Path),
+	StructInit(Path, std::vec::Vec<StructInitFieldData>),
+	Array(std::vec::Vec<Box<Expression>>),
+	FuncCall(Box<Expression>, std::vec::Vec<Box<Expression>>),
+	Field(Box<Expression>, SpannedString),
+	Index(Box<Expression>, Option<Box<Expression>>),
+	UnOp(UnOp, Box<Expression>),
+	BinOp(BinOp, Box<Expression>, Box<Expression>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BinOp {
+	Addition,
+	Substraction,
+	Multiplication,
+	Division,
+	Modulo,
+	Equality,
+	Inequality,
+	Concatenation,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnOp {
+	Reference,
+	MutReference,
+	Dereference,
+	Count,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Op {
+	UnOp(UnOp),
+	BinOp(BinOp),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructInitFieldData {
 	pub span: Span,
-	pub name: String,
-	pub value: Expression,
+	pub name: SpannedString,
+	pub value: Box<Expression>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ArrayData {
+#[derive(Debug, Clone)]
+pub struct Path {
 	pub span: Span,
-	pub items: std::vec::Vec<Expression>,
+	pub parts: std::vec::Vec<SpannedString>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct VariableData {
+impl PartialEq for Path {
+	fn eq(&self, other: &Self) -> bool {
+		self.parts == other.parts
+	}
+}
+
+impl Eq for Path { }
+
+impl Hash for Path {
+	fn hash<H>(&self, state: &mut H) where H: Hasher {
+		self.parts.hash(state)
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct SpannedString {
 	pub span: Span,
-	pub path: Path,
+	pub ident: String,
 }
 
-pub type Path = std::vec::Vec<Box<PathPart>>;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum PathPart { // TODO: rework with recursive data structures... The problem right now is that we read from left to right, but recursive data structures would imply right to left construction.
-	ModulePathPart,
-	FieldPathPart,
-	IndexPathPart(Box<IndexPathPartData>),
-	IdentifierPathPart(Box<IdentifierPathPartData>),
+impl PartialEq for SpannedString {
+	fn eq(&self, other: &Self) -> bool {
+		self.ident == other.ident
+	}
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct IndexPathPartData {
-	pub span: Span,
-	pub index: Option<Expression>,
-}
+impl Eq for SpannedString { }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct IdentifierPathPartData {
-	pub span: Span,
-	pub identifier: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct StringLiteralData {
-	pub span: Span,
-	pub value: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct IntegerLiteralData {
-	pub span: Span,
-	pub value: i64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct BoolLiteralData {
-	pub span: Span,
-	pub value: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct CharLiteralData {
-	pub span: Span,
-	pub value: char,
+impl Hash for SpannedString {
+	fn hash<H>(&self, state: &mut H) where H: Hasher {
+		self.ident.hash(state)
+	}
 }

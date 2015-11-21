@@ -14,6 +14,7 @@ pub struct Parser<'a> {
 	ast: Box<Ast>,
 	last_sp: Span,
 	current_token: SToken,
+	just_skept_newline: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -36,6 +37,7 @@ impl<'a> Parser<'a> {
 					erow: 0,
 				}
 			},
+			just_skept_newline: false,
 		}
 	}
 
@@ -49,31 +51,42 @@ impl<'a> Parser<'a> {
 		Ok(&self.ast)
 	}
 
-	fn precedence_for_token(token: Token, unary: bool) -> u8 {
-		match token {
+	fn binop_for_token(stoken: SToken) -> Option<BinOp> {
+		match stoken.tok.clone() {
 			Token::Symbol(s) => {
-				if unary {
-					match s {
-						Symbol::Star |
-						Symbol::Hash |
-						Symbol::Amp => 4,
-						_ => 0
-					}
-				} else {
-					match s {
-						Symbol::EqualEqual |
-						Symbol::NotEqual => 1,
-						Symbol::Plus |
-						Symbol::Minus |
-						Symbol::Concat => 2,
-						Symbol::Star |
-						Symbol::Over |
-						Symbol::Modulo => 3,
-						_ => 0
-					}
+				let binop = match s {
+					Symbol::Plus => BinOp::Addition,
+					Symbol::Minus => BinOp::Substraction,
+					Symbol::Star => BinOp::Multiplication,
+					Symbol::Over => BinOp::Division,
+					Symbol::Modulo => BinOp::Modulo,
+					Symbol::Concat => BinOp::Concatenation,
+					Symbol::EqualEqual => BinOp::Equality,
+					Symbol::NotEqual => BinOp::Inequality,
+					_ => return None
+				};
+
+				Some(binop)
+			},
+			_ => None
+		}
+	}
+
+	fn precedence_for_op(op: Op) -> u8 {
+		match op {
+			Op::UnOp(_) => std::u8::MAX,
+			Op::BinOp(binop) => {
+				match binop {
+					BinOp::Equality |
+					BinOp::Inequality => 1,
+					BinOp::Addition |
+					BinOp::Substraction |
+					BinOp::Concatenation => 2,
+					BinOp::Multiplication |
+					BinOp::Division |
+					BinOp::Modulo => 3,
 				}
 			},
-			_ => 0,
 		}
 	}
 
@@ -160,9 +173,9 @@ impl<'a> Parser<'a> {
 			};
 		};
 
-		let mut return_type: Option<Type> = None;
+		let mut return_type: Type = Type::NoType;
 		if try!(self.accept(Token::Symbol(Symbol::Return))).is_some() {
-			return_type = Some(try!(self.parse_type()));
+			return_type = try!(self.parse_type());
 		}
 
 		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
@@ -231,7 +244,7 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_block_statement(&mut self, return_type: Option<Type>) -> Result<BlockStatement, String> {
+	fn parse_block_statement(&mut self, return_type: Type) -> Result<BlockStatement, String> {
 		if let Some(t) = try!(self.accept(Token::Keyword(Keyword::Var))) {
 			Ok(BlockStatement::VarDecl(try!(self.parse_var_decl(t.sp))))
 		} else if let Some(t) = try!(self.accept(Token::Keyword(Keyword::If))) {
@@ -242,119 +255,21 @@ impl<'a> Parser<'a> {
 			Ok(BlockStatement::ForIn(try!(self.parse_forin(return_type, t.sp))))
 		} else if let Some(t) = try!(self.accept(Token::Keyword(Keyword::Return))) {
 			Ok(BlockStatement::Return(try!(self.parse_return(return_type, t.sp))))
-		} else if let Some(identifier) = try!(self.accept_any(Token::Identifier("".to_string()))) {
-			match identifier.tok {
-				Token::Identifier(i) => {
-					let mut path: Path = vec![];
-
-					path.push(
-						Box::new(
-							PathPart::IdentifierPathPart(
-								Box::new(
-									IdentifierPathPartData {
-										span: identifier.sp.clone(),
-										identifier: i
-									}
-								)
-							)
-						)
-					);
-
-					while try!(self.accept(Token::Symbol(Symbol::ColonColon))).is_some() {
-						let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
-						let next_path = match next_path_token.tok {
-							Token::Identifier(id) => id,
-							_ => return Err("".to_string()) // Should never happen
-						};
-
-						path.push(
-							Box::new(PathPart::ModulePathPart)
-						);
-
-						path.push(
-							Box::new(
-								PathPart::IdentifierPathPart(
-									Box::new(
-										IdentifierPathPartData {
-											span: next_path_token.sp,											identifier: next_path
-										}
-									)
-								)
-							)
-						);
-					}
-
-					if try!(self.accept(Token::Symbol(Symbol::LeftParenthesis))).is_some() {
-						Ok(BlockStatement::FuncCall(try!(self.parse_func_call(path, identifier.sp))))
-					} else {
-						loop {
-							if try!(self.accept(Token::Symbol(Symbol::Dot))).is_some() {
-								let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
-								let next_path = match next_path_token.tok {
-									Token::Identifier(id) => id,
-									_ => return Err("".to_string()) // Should never happen
-								};
-
-								path.push(
-									Box::new(PathPart::FieldPathPart)
-								);
-
-								path.push(
-									Box::new(
-										PathPart::IdentifierPathPart(
-											Box::new(
-												IdentifierPathPartData {
-													span: next_path_token.sp,
-													identifier: next_path
-												}
-											)
-										)
-									)
-								);
-							} else if try!(self.accept(Token::Symbol(Symbol::LeftBracket))).is_some() {
-								let st_sp = self.last_sp.clone();
-
-								let index = if try!(self.accept(Token::Symbol(Symbol::RightBracket))).is_some() {
-									None
-								} else {
-									let expr = try!(self.parse_expression());
-									try!(self.expect(Token::Symbol(Symbol::RightBracket)));
-
-									Some(expr)
-								};
-
-								path.push(
-									Box::new(
-										PathPart::IndexPathPart(
-											Box::new(
-												IndexPathPartData {
-													span: Span::concat(st_sp, self.last_sp.clone()),
-													index: index
-												}
-											)
-										)
-									)
-								);
-							} else {
-								break
-							};
-						}
-
-						if try!(self.accept(Token::Symbol(Symbol::Equal))).is_some() {
-							Ok(BlockStatement::VarAssignment(try!(self.parse_var_assignment(path, identifier.sp))))
-						} else {
-							return Err(format!("Parser error: unexpected token {:?}, {:?}", self.current_token.tok, self.current_token.sp))
-						}
-					}
-				},
-				_ => return Err("".to_string()), // Should never happen
-			}
 		} else {
-			return Err(format!("Parser error: unexpected token {:?}, {:?}", self.current_token.tok, self.current_token.sp))
+			let expr = try!(self.parse_expression());
+
+			if try!(self.accept(Token::Symbol(Symbol::Equal))).is_some() {
+				Ok(BlockStatement::VarAssignment(
+					Box::new(expr),
+					Box::new(try!(self.parse_expression())),
+				))
+			} else {
+				Ok(BlockStatement::Expression(Box::new(expr)))
+			}
 		}
 	}
 
-	fn parse_forin(&mut self, return_type: Option<Type>, start_sp: Span) -> Result<Box<ForInData>, String> {
+	fn parse_forin(&mut self, return_type: Type, start_sp: Span) -> Result<Box<ForInData>, String> {
 		let element_token = try!(self.expect_any(Token::Identifier("".to_string())));
 		let element_name = match element_token.tok {
 			Token::Identifier(s) => s,
@@ -382,12 +297,12 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_return(&mut self, return_type: Option<Type>, start_sp: Span) -> Result<Box<ReturnData>, String> {
+	fn parse_return(&mut self, return_type: Type, start_sp: Span) -> Result<Box<ReturnData>, String> {
 		Ok(Box::new(
 			ReturnData {
 				value: match return_type {
-					Some(_) => Some(try!(self.parse_expression())),
-					None => None,
+					Type::NoType => None,
+					_ => Some(try!(self.parse_expression())),
 				},
 				span: Span::concat(start_sp, self.last_sp.clone()),
 				expected_type: return_type,
@@ -395,7 +310,7 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_if(&mut self, return_type: Option<Type>, start_sp: Span) -> Result<Box<IfData>, String> {
+	fn parse_if(&mut self, return_type: Type, start_sp: Span) -> Result<Box<IfData>, String> {
 		let condition = try!(self.parse_expression());
 
 		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
@@ -430,7 +345,7 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_while(&mut self, return_type: Option<Type>, start_sp: Span) -> Result<Box<WhileData>, String> {
+	fn parse_while(&mut self, return_type: Type, start_sp: Span) -> Result<Box<WhileData>, String> {
 		let condition = try!(self.parse_expression());
 
 		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
@@ -445,35 +360,6 @@ impl<'a> Parser<'a> {
 				span: Span::concat(start_sp, self.last_sp.clone()),
 				condition: condition,
 				statements: statements,
-			}
-		))
-	}
-
-	fn parse_func_call(&mut self, path: Path, start_sp: Span) -> Result<Box<FuncCallData>, String> {
-		let mut args: std::vec::Vec<Box<FuncCallArgData>> = vec![];
-		while try!(self.accept(Token::Symbol(Symbol::RightParenthesis))).is_none() {
-			let sp = self.current_token.sp.clone();
-
-			args.push(
-				Box::new(
-					FuncCallArgData {
-						value: try!(self.parse_expression()),
-						span: Span::concat(sp, self.last_sp.clone())
-					}
-				)
-			);
-			if self.current_token.tok == Token::Symbol(Symbol::RightParenthesis) {
-				try!(self.accept(Token::Symbol(Symbol::Comma)));
-			} else {
-				try!(self.expect(Token::Symbol(Symbol::Comma)));
-			};
-		};
-
-		Ok(Box::new(
-			FuncCallData {
-				span: Span::concat(start_sp, self.last_sp.clone()),
-				path: path,
-				arguments: args,
 			}
 		))
 	}
@@ -505,377 +391,95 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_var_assignment(&mut self, path: Path, start_sp: Span) -> Result<Box<VarAssignmentData>, String> {
-		let expression = try!(self.parse_expression());
-		Ok(Box::new(
-			VarAssignmentData {
-				span: Span::concat(start_sp, self.last_sp.clone()),
-				path: path,
-				value: expression,
-			}
-		))
-	}
+	fn parse_path(&mut self, first_part: Option<SToken>) -> Result<Path, String> {
+		let mut parts: std::vec::Vec<SpannedString> = vec![];
 
-	fn parse_expression(&mut self) -> Result<Expression, String> {
-		self.parse_expression_rec(None, 0)
-	}
-
-	fn parse_expression_rec(&mut self, prev_expr: Option<Expression>, minimum_precedence: u8) -> Result<Expression, String> {
-		let new_expr = match prev_expr {
-			Some(expr) => {
-				if try!(self.accept(Token::Symbol(Symbol::Plus))).is_some() {
-					Expression::Addition(
-						Box::new(
-							expr
-						),
-						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Plus), false)))
-						)
-					)
-				} else if try!(self.accept(Token::Symbol(Symbol::Minus))).is_some() {
-					Expression::Substraction(
-						Box::new(
-							expr
-						),
-						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Minus), false)))
-						)
-					)
-				} else if try!(self.accept(Token::Symbol(Symbol::Star))).is_some() {
-					Expression::Multiplication(
-						Box::new(
-							expr
-						),
-						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Star), false)))
-						)
-					)
-				} else if try!(self.accept(Token::Symbol(Symbol::Over))).is_some() {
-					Expression::Division(
-						Box::new(
-							expr
-						),
-						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Over), false)))
-						)
-					)
-				} else if try!(self.accept(Token::Symbol(Symbol::Modulo))).is_some() {
-					Expression::Modulo(
-						Box::new(
-							expr
-						),
-						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Modulo), false)))
-						)
-					)
-				} else if try!(self.accept(Token::Symbol(Symbol::EqualEqual))).is_some() {
-					Expression::Equality(
-						Box::new(
-							expr
-						),
-						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::EqualEqual), false)))
-						)
-					)
-				} else if try!(self.accept(Token::Symbol(Symbol::NotEqual))).is_some() {
-					Expression::Inequality(
-						Box::new(
-							expr
-						),
-						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::NotEqual), false)))
-						)
-					)
-				} else if try!(self.accept(Token::Symbol(Symbol::Concat))).is_some() {
-					Expression::Concatenation(
-						Box::new(
-							expr
-						),
-						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Concat), false)))
-						)
-					)
-				} else {
-					return Ok(expr)
-				}
-			},
-			None => {
-				if try!(self.accept(Token::Symbol(Symbol::LeftParenthesis))).is_some() {
-					let e = try!(self.parse_expression());
-					try!(self.expect(Token::Symbol(Symbol::RightParenthesis)));
-
-					e
-				} else if let Some(h) = try!(self.accept(Token::Symbol(Symbol::Hash))) {
-					Expression::Count(
-						Box::new(
-							try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Hash), true)))
-						),
-						h.sp
-					)
-				} else if let Some(a) = try!(self.accept(Token::Symbol(Symbol::Amp))) {
-					Expression::Reference(
-						Box::new(
-							match try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Amp), true))) {
-								v @ Expression::Variable(_) => v,
-								e => return Err(format!("Parser error: can't reference a non-variable, {:?}", Span::concat(a.sp, Span::from_expression(&e))))
-							}
-						),
-						a.sp
-					)
-				} else if let Some(s) = try!(self.accept(Token::Symbol(Symbol::Star))) {
-					Expression::Dereference(
-						Box::new(
-							match try!(self.parse_expression_rec(None, Self::precedence_for_token(Token::Symbol(Symbol::Star), true))) {
-								v @ Expression::Variable(_) => v,
-								fc @ Expression::FuncCall(_) => fc,
-								e => return Err(format!("Parser error: can't dereference a non-(variable/funccall), {:?}", Span::concat(s.sp, Span::from_expression(&e))))
-							}
-						),
-						s.sp
-					)
-				} else if let Some(lb) = try!(self.accept(Token::Symbol(Symbol::LeftBracket))) {
-					let mut items: std::vec::Vec<Expression> = vec![];
-					while try!(self.accept(Token::Symbol(Symbol::RightBracket))).is_none() {
-						items.push(try!(self.parse_expression()));
-						if self.current_token.tok == Token::Symbol(Symbol::RightBracket) {
-							try!(self.accept(Token::Symbol(Symbol::Comma)));
-						} else {
-							try!(self.expect(Token::Symbol(Symbol::Comma)));
-						};
-					};
-
-					Expression::Array(
-						Box::new(
-							ArrayData {
-								span: Span::concat(lb.sp, self.last_sp.clone()),
-								items: items
-							}
-						)
-					)
-				} else if let Some(n) = try!(self.accept(Token::Keyword(Keyword::New))) {
-					let identifier = try!(self.expect_any(Token::Identifier("".to_string())));
-					let mut path: Path = vec![];
-
-					let i = match identifier.tok {
-						Token::Identifier(i) => i,
-						_ => return Err("".to_string()) // Should never happen
-					};
-
-					path.push(
-						Box::new(
-							PathPart::IdentifierPathPart(
-								Box::new(
-									IdentifierPathPartData {
-										span: identifier.sp,
-										identifier: i
-									}
-								)
-							)
-						)
-					);
-
-					while try!(self.accept(Token::Symbol(Symbol::ColonColon))).is_some() {
-						let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
-						let next_path = match next_path_token.tok {
-							Token::Identifier(id) => id,
-							_ => return Err("".to_string()) // Should never happen
-						};
-
-						path.push(
-							Box::new(PathPart::ModulePathPart)
-						);
-
-						path.push(
-							Box::new(
-								PathPart::IdentifierPathPart(
-									Box::new(
-										IdentifierPathPartData {
-											span: next_path_token.sp,
-											identifier: next_path
-										}
-									)
-								)
-							)
-						);
-					}
-
-					try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
-
-					Expression::StructInit(try!(self.parse_struct_init(path, n.sp)))
-				} else if let Some(string_literal) = try!(self.accept_any(Token::StringLiteral("".to_string()))) {
-					match string_literal.tok {
-						Token::StringLiteral(s) => {
-							Expression::StringLiteral(
-								Box::new(
-									StringLiteralData {
-										span: string_literal.sp,
-										value: s
-									}
-								)
-							)
-						},
-						_ => return Err("".to_string()) // Should never happen
-					}
-				} else if let Some(integer_literal) = try!(self.accept_any(Token::IntegerLiteral(0))) {
-					match integer_literal.tok {
-						Token::IntegerLiteral(i) => {
-							Expression::IntegerLiteral(
-								Box::new(
-									IntegerLiteralData {
-										span: integer_literal.sp,
-										value: i
-									}
-								)
-							)
-						},
-						_ => return Err("".to_string()) // Should never happen
-					}
-				} else if let Some(bool_literal) = try!(self.accept_any(Token::BoolLiteral(false))) {
-					match bool_literal.tok {
-						Token::BoolLiteral(b) => {
-							Expression::BoolLiteral(
-								Box::new(
-									BoolLiteralData {
-										span: bool_literal.sp,
-										value: b
-									}
-								)
-							)
-						},
-						_ => return Err("".to_string()) // Should never happen
-					}
-				} else if let Some(char_literal) = try!(self.accept_any(Token::CharLiteral('\0'))) {
-					match char_literal.tok {
-						Token::CharLiteral(c) => {
-							Expression::CharLiteral(
-								Box::new(
-									CharLiteralData {
-										span: char_literal.sp,
-										value: c
-									}
-								)
-							)
-						},
-						_ => return Err("".to_string()) // Should never happen
-					}
-				} else if let Some(identifier) = try!(self.accept_any(Token::Identifier("".to_string()))) {
-					let mut path: Path = vec![];
-
-					let i = match identifier.tok {
-						Token::Identifier(i) => i,
-						_ => return Err("".to_string()) // Should never happen
-					};
-
-					path.push(
-						Box::new(
-							PathPart::IdentifierPathPart(
-								Box::new(
-									IdentifierPathPartData {
-										span: identifier.sp.clone(),
-										identifier: i
-									}
-								)
-							)
-						)
-					);
-
-					while try!(self.accept(Token::Symbol(Symbol::ColonColon))).is_some() {
-						let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
-						let next_path = match next_path_token.tok {
-							Token::Identifier(id) => id,
-							_ => return Err("".to_string()) // Should never happen
-						};
-
-						path.push(
-							Box::new(PathPart::ModulePathPart)
-						);
-
-						path.push(
-							Box::new(
-								PathPart::IdentifierPathPart(
-									Box::new(
-										IdentifierPathPartData {
-											span: next_path_token.sp,
-											identifier: next_path
-										}
-									)
-								)
-							)
-						);
-					}
-
-					if try!(self.accept(Token::Symbol(Symbol::LeftParenthesis))).is_some() {
-						Expression::FuncCall(try!(self.parse_func_call(path, identifier.sp)))
-					} else {
-						loop {
-							if try!(self.accept(Token::Symbol(Symbol::Dot))).is_some() {
-								let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
-								let next_path = match next_path_token.tok {
-									Token::Identifier(id) => id,
-									_ => return Err("".to_string()) // Should never happen
-								};
-
-								path.push(
-									Box::new(PathPart::FieldPathPart)
-								);
-
-								path.push(
-									Box::new(
-										PathPart::IdentifierPathPart(
-											Box::new(
-												IdentifierPathPartData {
-													span: next_path_token.sp,
-													identifier: next_path
-												}
-											)
-										)
-									)
-								);
-							} else if let Some(lb) =  try!(self.accept(Token::Symbol(Symbol::LeftBracket))) {
-								let expr = try!(self.parse_expression());
-								try!(self.expect(Token::Symbol(Symbol::RightBracket)));
-
-								path.push(
-									Box::new(
-										PathPart::IndexPathPart(
-											Box::new(
-												IndexPathPartData {
-													span: Span::concat(lb.sp, self.last_sp.clone()),
-													index: Some(expr)
-												}
-											)
-										)
-									)
-								);
-							} else {
-								break
-							};
-						}
-
-						Expression::Variable(
-							Box::new(
-								VariableData {
-									span: Span::concat(identifier.sp, self.last_sp.clone()),
-									path: path
-								}
-							)
-						)
-					}
-				} else {
-					return Err(format!("Parser error: unexpected token {:?}. {:?}", self.current_token.tok, self.current_token.sp))
-				}
-			},
+		let ident_token = match first_part {
+			Some(t) => t,
+			None => try!(self.expect_any(Token::Identifier("".to_string())))
 		};
 
-		if Self::precedence_for_token(self.current_token.tok.clone(), false) > minimum_precedence{
-			self.parse_expression_rec(Some(new_expr), minimum_precedence)
-		} else {
-			Ok(new_expr)
+		let ident = match ident_token.tok {
+			Token::Identifier(i) => i,
+			_ => return Err("".to_string()) // Should never happen
+		};
+
+		parts.push(SpannedString {
+			span: ident_token.sp.clone(),
+			ident: ident,
+		});
+
+		while try!(self.accept(Token::Symbol(Symbol::ColonColon))).is_some() {
+			let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
+			let next_path = match next_path_token.tok {
+				Token::Identifier(id) => id,
+				_ => return Err("".to_string()) // Should never happen
+			};
+
+			parts.push(
+				SpannedString {
+					span: next_path_token.sp,
+					ident: next_path,
+				}
+			);
 		}
+
+		Ok(Path {
+			parts: parts,
+			span: Span::concat(ident_token.sp, self.last_sp.clone()),
+		})
 	}
 
-	fn parse_struct_init(&mut self, path: Path, start_sp: Span) -> Result<Box<StructInitData>, String> {
-		let mut fields: std::vec::Vec<Box<StructInitFieldData>> = vec![];
+	fn parse_expression_binop(&mut self, start_sp: Span, binop: BinOp, lhs: Expression) -> Result<Expression, String> {
+		Ok(Expression {
+			expr: Expression_::BinOp(
+				binop.clone(),
+				Box::new(
+					lhs
+				),
+				Box::new(
+					try!(self.parse_expression_(None, Self::precedence_for_op(Op::BinOp(binop))))
+				)
+			),
+			span: Span::concat(start_sp, self.last_sp.clone()),
+		})
+	}
+
+	fn parse_expression_unop(&mut self, start_sp: Span, unop: UnOp) -> Result<Expression, String> {
+		Ok(Expression {
+			expr: Expression_::UnOp(
+				unop.clone(),
+				Box::new(
+					try!(self.parse_expression_(None, Self::precedence_for_op(Op::UnOp(unop))))
+				)
+			),
+			span: Span::concat(start_sp, self.last_sp.clone()),
+		})
+	}
+
+	fn parse_expression_array(&mut self, start_sp: Span) -> Result<Expression, String> {
+		let mut items: std::vec::Vec<Box<Expression>> = vec![];
+		while try!(self.accept(Token::Symbol(Symbol::RightBracket))).is_none() {
+			items.push(Box::new(try!(self.parse_expression())));
+			if self.current_token.tok == Token::Symbol(Symbol::RightBracket) {
+				try!(self.accept(Token::Symbol(Symbol::Comma)));
+			} else {
+				try!(self.expect(Token::Symbol(Symbol::Comma)));
+			};
+		};
+
+		Ok(Expression {
+			expr: Expression_::Array(items),
+			span: Span::concat(start_sp, self.last_sp.clone()),
+		})
+	}
+
+	fn parse_expression_struct_init(&mut self, start_sp: Span) -> Result<Expression, String> {
+		let path = try!(self.parse_path(None));
+
+		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
+
+		let mut fields: std::vec::Vec<StructInitFieldData> = vec![];
 		while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
 			let field_name_token = try!(self.expect_any(Token::Identifier("".to_string())));
 			let field_name = match field_name_token.tok {
@@ -888,13 +492,14 @@ impl<'a> Parser<'a> {
 			let field_value = try!(self.parse_expression());
 
 			fields.push(
-				Box::new(
-					StructInitFieldData {
-						span: Span::concat(field_name_token.sp, self.last_sp.clone()),
-						name: field_name,
-						value: field_value,
-					}
-				)
+				StructInitFieldData {
+					span: Span::concat(field_name_token.sp.clone(), self.last_sp.clone()),
+					name: SpannedString {
+						span: field_name_token.sp,
+						ident: field_name,
+					},
+					value: Box::new(field_value),
+				}
 			);
 
 			if self.current_token.tok == Token::Symbol(Symbol::RightBrace) {
@@ -904,30 +509,191 @@ impl<'a> Parser<'a> {
 			};
 		};
 
-		Ok(Box::new(
-			StructInitData {
-				span: Span::concat(start_sp, self.last_sp.clone()),
-				path: path,
-				fields: fields,
+		Ok(Expression {
+			expr: Expression_::StructInit(
+				path,
+				fields,
+			),
+			span: Span::concat(start_sp, self.last_sp.clone()),
+		})
+
+	}
+
+	fn parse_expression_literal(&mut self, stoken: SToken) -> Result<Expression, String> {
+		let expr = match stoken.tok {
+			Token::StringLiteral(s) => Expression_::StringLiteral(s),
+			Token::IntegerLiteral(i) => Expression_::IntegerLiteral(i),
+			Token::BoolLiteral(b) => Expression_::BoolLiteral(b),
+			Token::CharLiteral(c) => Expression_::CharLiteral(c),
+			_ => return Err("".to_string()) // Should never happen
+		};
+
+		Ok(Expression {
+			expr: expr,
+			span: stoken.sp,
+		})
+	}
+
+	fn parse_expression_func_call(&mut self, start_sp: Span, func_expr: Expression) -> Result<Expression, String> {
+		let mut args: std::vec::Vec<Box<Expression>> = vec![];
+		while try!(self.accept(Token::Symbol(Symbol::RightParenthesis))).is_none() {
+			args.push(Box::new(try!(self.parse_expression())));
+
+			if self.current_token.tok == Token::Symbol(Symbol::RightParenthesis) {
+				try!(self.accept(Token::Symbol(Symbol::Comma)));
+			} else {
+				try!(self.expect(Token::Symbol(Symbol::Comma)));
+			};
+		};
+
+		Ok(Expression {
+			span: Span::concat(start_sp, self.last_sp.clone()),
+			expr: Expression_::FuncCall(Box::new(func_expr), args),
+		})
+	}
+
+	fn parse_expression_field(&mut self, start_sp: Span, struct_expr: Expression) -> Result<Expression, String> {
+		let field_token = try!(self.expect_any(Token::Identifier("".to_string())));
+		let field = match field_token.tok {
+			Token::Identifier(i) => i,
+			_ => return Err("".to_string()) // Should never happen
+		};
+
+		Ok(Expression {
+			span: Span::concat(start_sp, field_token.sp.clone()),
+			expr: Expression_::Field(
+				Box::new(struct_expr),
+				SpannedString {
+					span: field_token.sp,
+					ident: field,
+				},
+			),
+		})
+	}
+
+	fn parse_expression_index(&mut self, start_sp: Span, indexable_expr: Expression) -> Result<Expression, String> {
+		let index = if try!(self.accept(Token::Symbol(Symbol::RightBracket))).is_some() {
+			None
+		} else {
+			let expr = try!(self.parse_expression());
+			try!(self.expect(Token::Symbol(Symbol::RightBracket)));
+
+			Some(Box::new(expr))
+		};
+
+		Ok(Expression {
+			expr: Expression_::Index(Box::new(indexable_expr), index),
+			span: Span::concat(start_sp, self.last_sp.clone()),
+		})
+	}
+
+	fn parse_expression_variable(&mut self, stoken: SToken) -> Result<Expression, String> {
+		let path = try!(self.parse_path(Some(stoken)));
+
+		Ok(Expression {
+			span: path.span.clone(),
+			expr: Expression_::Variable(path),
+		})
+	}
+
+	fn parse_expression(&mut self) -> Result<Expression, String> {
+		self.parse_expression_(None, 0)
+	}
+
+	fn parse_expression_(&mut self, prev_expr: Option<Expression>, minimum_precedence: u8) -> Result<Expression, String> {
+		let new_expr = match prev_expr {
+			Some(expr) => {
+				if try!(self.accept(Token::Symbol(Symbol::Plus))).is_some() {
+					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Addition, expr))
+				} else if try!(self.accept(Token::Symbol(Symbol::Minus))).is_some() {
+					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Substraction, expr))
+				} else if try!(self.accept(Token::Symbol(Symbol::Star))).is_some() {
+					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Multiplication, expr))
+				} else if try!(self.accept(Token::Symbol(Symbol::Over))).is_some() {
+					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Division, expr))
+				} else if try!(self.accept(Token::Symbol(Symbol::Modulo))).is_some() {
+					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Modulo, expr))
+				} else if try!(self.accept(Token::Symbol(Symbol::EqualEqual))).is_some() {
+					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Equality, expr))
+				} else if try!(self.accept(Token::Symbol(Symbol::NotEqual))).is_some() {
+					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Inequality, expr))
+				} else if try!(self.accept(Token::Symbol(Symbol::Concat))).is_some() {
+					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Concatenation, expr))
+				} else if try!(self.accept(Token::Symbol(Symbol::LeftParenthesis))).is_some() {
+					try!(self.parse_expression_func_call(expr.span.clone(), expr))
+				} else if try!(self.accept(Token::Symbol(Symbol::Dot))).is_some() {
+					try!(self.parse_expression_field(expr.span.clone(), expr))
+				} else if try!(self.accept(Token::Symbol(Symbol::LeftBracket))).is_some() {
+					try!(self.parse_expression_index(expr.span.clone(), expr))
+				} else {
+					return Ok(expr)
+				}
+			},
+			None => {
+				if try!(self.accept(Token::Symbol(Symbol::LeftParenthesis))).is_some() {
+					let e = try!(self.parse_expression());
+					try!(self.expect(Token::Symbol(Symbol::RightParenthesis)));
+
+					e
+				} else if let Some(h) = try!(self.accept(Token::Symbol(Symbol::Hash))) {
+					try!(self.parse_expression_unop(h.sp, UnOp::Count))
+				} else if let Some(a) = try!(self.accept(Token::Symbol(Symbol::Amp))) {
+					try!(self.parse_expression_unop(a.sp, UnOp::Reference))
+				} else if let Some(a) = try!(self.accept(Token::Symbol(Symbol::At))) {
+					try!(self.parse_expression_unop(a.sp, UnOp::MutReference))
+				} else if let Some(s) = try!(self.accept(Token::Symbol(Symbol::Star))) {
+					try!(self.parse_expression_unop(s.sp, UnOp::Dereference))
+				} else if let Some(lb) = try!(self.accept(Token::Symbol(Symbol::LeftBracket))) {
+					try!(self.parse_expression_array(lb.sp))
+				} else if let Some(n) = try!(self.accept(Token::Keyword(Keyword::New))) {
+					try!(self.parse_expression_struct_init(n.sp))
+				} else if let Some(sl) = try!(self.accept_any(Token::StringLiteral("".to_string()))) {
+					try!(self.parse_expression_literal(sl))
+				} else if let Some(il) = try!(self.accept_any(Token::IntegerLiteral(0))) {
+					try!(self.parse_expression_literal(il))
+				} else if let Some(bl) = try!(self.accept_any(Token::BoolLiteral(false))) {
+					try!(self.parse_expression_literal(bl))
+				} else if let Some(cl) = try!(self.accept_any(Token::CharLiteral('\0'))) {
+					try!(self.parse_expression_literal(cl))
+				} else if let Some(ident_token) = try!(self.accept_any(Token::Identifier("".to_string()))) {
+					try!(self.parse_expression_variable(ident_token))
+				} else {
+					return Err(format!("Parser error: unexpected token {:?}. {:?}", self.current_token.tok, self.current_token.sp))
+				}
+			},
+		};
+
+		if self.just_skept_newline {
+			Ok(new_expr)
+		} else {
+			if let Some(binop) = Self::binop_for_token(self.current_token.clone()) {
+				if Self::precedence_for_op(Op::BinOp(binop)) > minimum_precedence {
+					self.parse_expression_(Some(new_expr), minimum_precedence)
+				} else {
+					Ok(new_expr)
+				}
+			} else {
+				if self.current_token.tok == Token::Symbol(Symbol::LeftParenthesis) ||
+				   self.current_token.tok == Token::Symbol(Symbol::LeftBracket) ||
+				   self.current_token.tok == Token::Symbol(Symbol::Dot) { // TODO: find a prettier solution
+					self.parse_expression_(Some(new_expr), std::u8::MAX)
+				} else {
+					Ok(new_expr)
+				}
 			}
-		))
+		}
 	}
 
 	fn parse_type(&mut self) -> Result<Type, String> {
 		fn get_builtin_type(path: &Path) -> Option<Type> {
-			if path.len() != 1 {
+			if path.parts.len() != 1 {
 				None
 			} else {
-				match **path.get(0).unwrap() {
-					PathPart::IdentifierPathPart(ref ipp) => {
-						match ipp.identifier.as_ref() {
-							"int" => Some(Type::IntType),
-							"bool" => Some(Type::BoolType),
-							"char" => Some(Type::CharType),
-							"string" => Some(Type::StringType),
-							_ => None,
-						}
-					},
+				match path.parts.get(0).unwrap().ident.as_ref() {
+					"int" => Some(Type::IntType),
+					"bool" => Some(Type::BoolType),
+					"char" => Some(Type::CharType),
+					"string" => Some(Type::StringType),
 					_ => None,
 				}
 			}
@@ -935,6 +701,10 @@ impl<'a> Parser<'a> {
 
 		if try!(self.accept(Token::Symbol(Symbol::Amp))).is_some() {
 			return Ok(Type::ReferenceType(
+				Box::new(try!(self.parse_type()))
+			))
+		} else if try!(self.accept(Token::Symbol(Symbol::At))).is_some() {
+			return Ok(Type::MutReferenceType(
 				Box::new(try!(self.parse_type()))
 			))
 		} else if try!(self.accept(Token::Symbol(Symbol::LeftBracket))).is_some() {
@@ -946,58 +716,11 @@ impl<'a> Parser<'a> {
 			))
 		};
 
-		let mut path: Path = vec![];
-		let type_token = try!(self.expect_any(Token::Identifier("".to_string())));
-		match type_token.tok {
-			Token::Identifier(i) => path.push(
-				Box::new(
-					PathPart::IdentifierPathPart(
-						Box::new(
-							IdentifierPathPartData {
-								span: type_token.sp,
-								identifier: i
-							}
-						)
-					)
-				)
-			),
-			_ => return Err("".to_string()) // Should never happen
-		};
-
-		while try!(self.accept(Token::Symbol(Symbol::ColonColon))).is_some() {
-			let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
-			let next_path = match next_path_token.tok {
-				Token::Identifier(id) => id,
-				_ => return Err("".to_string()) // Should never happen
-			};
-
-			path.push(
-				Box::new(PathPart::ModulePathPart)
-			);
-
-			path.push(
-				Box::new(
-					PathPart::IdentifierPathPart(
-						Box::new(
-							IdentifierPathPartData {
-								span: next_path_token.sp,
-								identifier: next_path
-							}
-						)
-					)
-				)
-			);
-		}
+		let path = try!(self.parse_path(None));
 
 		match get_builtin_type(&path) {
 			Some(t) => Ok(t),
-			None => Ok(Type::StructType(
-				Box::new(
-					StructTypeData {
-						path: path
-					}
-				)
-			))
+			None => Ok(Type::StructType(path)),
 		}
 	}
 
@@ -1012,6 +735,7 @@ impl<'a> Parser<'a> {
 		while self.current_token.tok == Token::Symbol(Symbol::NewLine) {
 			sp = Span::concat(sp, self.current_token.sp.clone());
 			try!(self.next_token());
+			self.just_skept_newline = true;
 		};
 
 		Ok(sp)
@@ -1036,6 +760,7 @@ impl<'a> Parser<'a> {
 
 		if token.is_some() {
 			try!(self.next_token());
+			self.just_skept_newline = false;
 			try!(self.skip_newlines());
 		}
 
@@ -1059,6 +784,7 @@ impl<'a> Parser<'a> {
 
 		if token.is_some() {
 			try!(self.next_token());
+			self.just_skept_newline = false;
 			try!(self.skip_newlines());
 		}
 
