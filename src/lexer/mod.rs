@@ -1,4 +1,6 @@
 use std;
+use std::fmt;
+use std::fmt::Formatter;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Keyword {
@@ -57,10 +59,11 @@ pub struct SToken {
 
 #[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub struct Span {
-    pub scol: i32,
     pub srow: i32,
-    pub ecol: i32,
+    pub scol: i32,
     pub erow: i32,
+    pub ecol: i32,
+    pub file: String,
 }
 
 impl Span {
@@ -70,6 +73,7 @@ impl Span {
             srow: sp1.srow,
             ecol: sp2.ecol,
             erow: sp2.erow,
+            file: sp1.file,
         }
     }
 
@@ -79,7 +83,14 @@ impl Span {
             srow: 0,
             ecol: 0,
             erow: 0,
+            file: "".to_string(),
         }
+    }
+}
+
+impl fmt::Display for Span {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}:{}", self.file, self.srow)
     }
 }
 
@@ -97,6 +108,7 @@ pub enum Token {
 }
 
 pub struct Reader<'a> {
+    pub filename: String,
     pub src: &'a str,
     itr: std::str::Chars<'a>,
     current_char: Option<char>,
@@ -107,8 +119,9 @@ pub struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    pub fn new(input: &'a str) -> Self {
+    pub fn new(input: &'a str, filename: String) -> Self {
         let mut reader = Reader {
+            filename: filename,
             src: input,
             itr: input.chars(),
             current_char: None,
@@ -120,6 +133,16 @@ impl<'a> Reader<'a> {
         reader.next_char();
 
         reader
+    }
+
+    fn get_current_span(&self) -> Span {
+        Span {
+            file: self.filename.clone(),
+            scol: self.start_col,
+            srow: self.start_row,
+            ecol: self.current_col,
+            erow: self.current_row,
+        }
     }
 
     pub fn next_token(&mut self) -> Result<SToken, String> {
@@ -147,12 +170,7 @@ impl<'a> Reader<'a> {
 
         Ok(SToken {
             tok: try!(new_token),
-            sp: Span {
-                scol: self.start_col,
-                srow: self.start_row,
-                ecol: self.current_col,
-                erow: self.current_row,
-            }
+            sp: self.get_current_span(),
         })
     }
 
@@ -197,12 +215,7 @@ impl<'a> Reader<'a> {
                 number.push(c);
             } else if c == '.' {
                 if float {
-                    return Err(format!("Lexer error: unexpected '.', {:?}", Span {
-                        scol: self.start_col,
-                        srow: self.start_row,
-                        ecol: self.current_col,
-                        erow: self.current_row,
-                    }));
+                    return Err(format!("Lexer error ({}): unexpected '.'", self.get_current_span()));
                 } else {
                     float = true;
                     number.push(c);
@@ -218,23 +231,13 @@ impl<'a> Reader<'a> {
             if let Some(f) = number.parse::<f64>().ok() {
                 Ok(Token::FloatLiteral(f))
             } else {
-                Err(format!("Lexer error: failed to parse float, {:?}", Span {
-                    scol: self.start_col,
-                    srow: self.start_row,
-                    ecol: self.current_col,
-                    erow: self.current_row,
-                }))
+                Err(format!("Lexer error ({}): failed to parse float", self.get_current_span()))
             }
         } else {
             if let Some(i) = number.parse::<i64>().ok() {
                 Ok(Token::IntegerLiteral(i))
             } else {
-                Err(format!("Lexer error: failed to parse integer, {:?}", Span {
-                    scol: self.start_col,
-                    srow: self.start_row,
-                    ecol: self.current_col,
-                    erow: self.current_row,
-                }))
+                Err(format!("Lexer error ({}): failed to parse integer", self.get_current_span()))
             }
         }
     }
@@ -242,12 +245,7 @@ impl<'a> Reader<'a> {
     fn read_char(&mut self) -> Result<Token, String> {
         let mut c = match self.next_char() {
             Some(c) => c,
-            None => return Err(format!("Lexer error: failed to parse char, {:?}", Span {
-                scol: self.start_col,
-                srow: self.start_row,
-                ecol: self.current_col,
-                erow: self.current_row,
-            })),
+            None => return Err(format!("Lexer error ({}): failed to parse char", self.get_current_span())),
         };
 
         if c == '\\' { // TODO: make escaping more accurate and complete
@@ -259,20 +257,10 @@ impl<'a> Reader<'a> {
                 self.next_char();
                 Ok(Token::CharLiteral(c))
             } else {
-                Err(format!("Lexer error: failed to parse char, {:?}", Span {
-                    scol: self.start_col,
-                    srow: self.start_row,
-                    ecol: self.current_col,
-                    erow: self.current_row,
-                }))
+                Err(format!("Lexer error ({}): failed to parse char", self.get_current_span()))
             }
         } else {
-            Err(format!("Lexer error: failed to parse char, {:?}", Span {
-                scol: self.start_col,
-                srow: self.start_row,
-                ecol: self.current_col,
-                erow: self.current_row,
-            }))
+            Err(format!("Lexer error ({}): failed to parse char", self.get_current_span()))
         }
     }
 
@@ -301,12 +289,7 @@ impl<'a> Reader<'a> {
         if closed {
             Ok(Token::StringLiteral(string))
         } else {
-            Err(format!("Lexer error: failed to parse string, {:?}", Span {
-                scol: self.start_col,
-                srow: self.start_row,
-                ecol: self.current_col,
-                erow: self.current_row,
-            }))
+            Err(format!("Lexer error ({}): failed to parse string", self.get_current_span()))
         }
     }
 
@@ -372,12 +355,7 @@ impl<'a> Reader<'a> {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::NotEqual))
                     },
-                    _ => Err(format!("Lexer error: failed to parse symbol, {:?}", Span {
-                        scol: self.start_col,
-                        srow: self.start_row,
-                        ecol: self.current_col,
-                        erow: self.current_row,
-                    }))
+                    _ => Err(format!("Lexer error ({}): failed to parse symbol", self.get_current_span()))
                 }
             },
             '#' => Ok(Token::Symbol(Symbol::Hash)),
@@ -403,12 +381,7 @@ impl<'a> Reader<'a> {
                     _ => Ok(Token::Symbol(Symbol::More))
                 }
             },
-            _ => Err(format!("Lexer error: failed to parse symbol, {:?}", Span {
-                scol: self.start_col,
-                srow: self.start_row,
-                ecol: self.current_col,
-                erow: self.current_row,
-            })),
+            _ => Err(format!("Lexer error ({}): failed to parse symbol", self.get_current_span())),
         };
 
         self.next_char();

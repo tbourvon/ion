@@ -148,7 +148,7 @@ impl<'a> Interpreter<'a> {
 		unsafe {
 			match *value {
 				Value::Array(ref t, _) => match *t {
-					Type::NoType => Err(format!("Interpreter error: cannot deduce type for empty array, {:?}", span)),
+					Type::NoType => Err(format!("Interpreter error ({}): cannot deduce type for empty array", span)),
 					ref array_type => Ok(Type::ArrayType(
 						Box::new((*array_type).clone())
 					)),
@@ -185,7 +185,7 @@ impl<'a> Interpreter<'a> {
 	    if let Some(err) = res.err() {
 	        return Err(format!("{}", err))
 	    }
-	    let mut reader = lexer::Reader::new(s.as_ref());
+	    let mut reader = lexer::Reader::new(s.as_ref(), path_string.clone());
 
 	    let mut parser = parser::Parser::new(&mut reader);
 	    let ast = try!(parser.parse());
@@ -276,7 +276,7 @@ impl<'a> Interpreter<'a> {
 					}
 				}
 			},
-			other => return Err(format!("Cannot iterate over {:?}, {:?}", other, forin_data.collection.span)),
+			other => return Err(format!("Interpreter error ({}): Cannot iterate over {:?}", forin_data.collection.span, other)),
 		};
 
 		Ok(Value::Nil)
@@ -286,7 +286,7 @@ impl<'a> Interpreter<'a> {
 		match return_data.expected_type {
 			Type::NoType => {
 				if let Some(_) = return_data.value {
-					return Err(format!("Interpreter error: unexpected expression in return statement, {:?}", return_data.span))
+					return Err(format!("Interpreter error ({}): unexpected expression in return statement", return_data.span))
 				}
 
 				Ok(Value::Nil)
@@ -298,12 +298,12 @@ impl<'a> Interpreter<'a> {
 						span = e.span.clone();
 						try!(self.value_from_expression(context, e))
 					},
-					None => return Err(format!("Interpreter error: expected expression for return statement, {:?}", return_data.span)),
+					None => return Err(format!("Interpreter error ({}): expected expression for return statement", return_data.span)),
 				};
 
 				let value_type = try!(Self::type_from_value(&value, span.clone()));
 				if value_type != *t {
-					return Err(format!("Interpreter error: mismatched types in return statement (got {:?} expected {:?}), {:?}", value_type, *t, span))
+					return Err(format!("Interpreter error ({}): mismatched types in return statement (got {:?} expected {:?})", span, value_type, *t))
 				}
 
 				Ok(value)
@@ -333,7 +333,7 @@ impl<'a> Interpreter<'a> {
 			let func_decl = unsafe {
 				match *try!(self.value_p_from_expression(context, &func)) {
 					Value::Func(ref fd) => fd,
-					_ => return Err(format!("Interpereter error: cannot call non-function, {:?}", func.span))
+					_ => return Err(format!("Interpereter error ({}): cannot call non-function", func.span))
 				}
 			};
 
@@ -353,7 +353,7 @@ impl<'a> Interpreter<'a> {
 							let value_type = try!(Self::type_from_value(&value, args.get(param_count).unwrap().span.clone()));
 
 							if value_type != param.param_type {
-								return Err(format!("Interpreter error: mismatched types in function call (got {:?} expected {:?}), {:?}", value_type, param.param_type, &args.get(param_count).unwrap().span))
+								return Err(format!("Interpreter error ({}): mismatched types in function call (got {:?} expected {:?})", &args.get(param_count).unwrap().span, value_type, param.param_type))
 							} else {
 								value
 							}
@@ -364,12 +364,12 @@ impl<'a> Interpreter<'a> {
 								let value_type = try!(Self::type_from_value(&value, e.span.clone()));
 
 								if value_type != param.param_type {
-									return Err(format!("Interpreter error: mismatched types in function declaration default value (got {:?} expected {:?}), {:?}", value_type, param.param_type, e.span))
+									return Err(format!("Interpreter error ({}): mismatched types in function declaration default value (got {:?} expected {:?})", e.span, value_type, param.param_type))
 								} else {
 									value
 								}
 							} else {
-								return Err(format!("Interpreter error: expected argument for {:?}, {:?}", param.name, span))
+								return Err(format!("Interpreter error ({}): expected argument for {:?}", span, param.name))
 							}
 						}
 					}
@@ -426,7 +426,7 @@ impl<'a> Interpreter<'a> {
 						let value_type = try!(Self::type_from_value(&value, span.clone()));
 
 						if value_type != var_decl_data.var_type {
-							return Err(format!("Interpreter error: mismatched types in var initialization (got {:?} expected {:?}), {:?}", value_type, var_decl_data.var_type, span))
+							return Err(format!("Interpreter error ({}): mismatched types in var initialization (got {:?} expected {:?})", span, value_type, var_decl_data.var_type))
 						} else {
 							value
 						}
@@ -447,7 +447,7 @@ impl<'a> Interpreter<'a> {
 		let current_type = Self::type_from_value(lhs_value_ref, lhs.span.clone());
 
 		if value_type != current_type {
-			return Err(format!("Interpreter error: mismatched types in var assignment (got {:?} expected {:?}), {:?}", value_type, current_type, rhs.span))
+			return Err(format!("Interpreter error ({}): mismatched types in var assignment (got {:?} expected {:?})", rhs.span, value_type, current_type))
 		} else {
 			unsafe {
 				*lhs_value_ref = rhs_value;
@@ -477,7 +477,7 @@ impl<'a> Interpreter<'a> {
 				}
 				Ok(Value::Nil)
 			},
-			_ => Err(format!("Interpreter error: expected bool expression in if statement, {:?}", if_data.condition.span))
+			_ => Err(format!("Interpreter error ({}): expected bool expression in if statement", if_data.condition.span))
 		}
 	}
 
@@ -496,7 +496,7 @@ impl<'a> Interpreter<'a> {
 						return Ok(Value::Nil)
 					}
 				},
-				_ => return Err(format!("Interpreter error: expected bool expression in while statement, {:?}", while_data.condition.span))
+				_ => return Err(format!("Interpreter error ({}): expected bool expression in while statement", while_data.condition.span))
 			}
 		}
 	}
@@ -511,10 +511,10 @@ impl<'a> Interpreter<'a> {
 				};
 
 				if self.funcs.get(p).is_some() {
-					 return Err(format!("Interpreter error: cannot mutably reference function, {:?}", p.span));
+					 return Err(format!("Interpreter error ({}): cannot mutably reference function", p.span));
 				};
 
-				return Err(format!("Interpreter error: unknown variable {:?}, {:?}", p.parts, p.span));
+				return Err(format!("Interpreter error ({}): unknown variable {:?}", p.span, p.parts));
 			},
 
 			Expression_::Index(ref indexed, ref index) => {
@@ -530,13 +530,13 @@ impl<'a> Interpreter<'a> {
 									match *indexed_value_p {
 										Value::Array(_, ref mut a) => match a.get_mut(i as usize) {
 											Some(v) => Ok(v),
-											None => return Err(format!("Interpreter error: index out of bounds, {:?}", e.span)),
+											None => return Err(format!("Interpreter error ({}): index out of bounds", e.span)),
 										},
-										_ => return Err(format!("Interpreter error: can't access index on non-array, {:?}", expression.span))
+										_ => return Err(format!("Interpreter error ({}): can't access index on non-array", expression.span))
 									}
 								}
 							},
-							_ => return Err(format!("Interpreter error: invalid index type for array, {:?}", e.span))
+							_ => return Err(format!("Interpreter error ({}): invalid index type for array", e.span))
 						}
 					},
 
@@ -548,7 +548,7 @@ impl<'a> Interpreter<'a> {
 								Value::Array(ref t, ref mut a) => {
 									a.push(
 										match *t {
-											Type::NoType => return Err(format!("Interpreter error: cannot push to untyped array, {:?}", indexed.span)),
+											Type::NoType => return Err(format!("Interpreter error ({}): cannot push to untyped array", indexed.span)),
 											ref array_type => try!(self.default_value((*array_type).clone(), indexed.span.clone())),
 										}
 									);
@@ -556,7 +556,7 @@ impl<'a> Interpreter<'a> {
 									let last_index = a.len() - 1;
 									Ok(a.get_mut(last_index).unwrap())
 								},
-								_ => return Err(format!("Interpreter error: can't push to non-array, {:?}", indexed.span))
+								_ => return Err(format!("Interpreter error ({}): can't push to non-array", indexed.span))
 							}
 						}
 					},
@@ -570,10 +570,10 @@ impl<'a> Interpreter<'a> {
 						Value::Struct(_, ref mut fields) => {
 							match fields.get_mut(&field.ident) {
 								Some(f) => Ok(f.borrow_mut()),
-				                None => return Err(format!("Interpreter error: unknown struct field, {:?}", field.span)),
+				                None => return Err(format!("Interpreter error ({}): unknown struct field", field.span)),
 							}
 						},
-						_ => return Err(format!("Interpreter error: cannot access field on non-struct, {:?}", expression.span))
+						_ => return Err(format!("Interpreter error ({}): cannot access field on non-struct", expression.span))
 					}
 				}
 			},
@@ -583,15 +583,15 @@ impl<'a> Interpreter<'a> {
 					UnOp::Dereference => {
 						match try!(self.value_from_expression(context, e)) {
 							Value::MutReference(v) => Ok(v),
-							Value::Reference(_) => return Err(format!("Interpreter error: cannot dereference const reference in mut context, {:?}", expression.span)),
-							_ => return Err(format!("Interpreter error: cannot dereference non-reference, {:?}", expression.span))
+							Value::Reference(_) => return Err(format!("Interpreter error ({}): cannot dereference const reference in mut context", expression.span)),
+							_ => return Err(format!("Interpreter error ({}): cannot dereference non-reference", expression.span))
 						}
 					},
-					_ => return Err(format!("Interpreter error: cannot get mutable reference for {:?}, {:?}", expression.expr, expression.span))
+					_ => return Err(format!("Interpreter error ({}): cannot get mutable reference for {:?}", expression.span, expression.expr))
 				}
 			},
 
-			_ => return Err(format!("Interpreter error: cannot get mutable reference for {:?}, {:?}", expression.expr, expression.span))
+			_ => return Err(format!("Interpreter error ({}): cannot get mutable reference for {:?}", expression.span, expression.expr))
 		}
 	}
 
@@ -608,7 +608,7 @@ impl<'a> Interpreter<'a> {
 					 return Ok(f);
 				};
 
-				return Err(format!("Interpreter error: unknown variable {:?}, {:?}", p.parts, p.span));
+				return Err(format!("Interpreter error ({}): unknown variable {:?}", p.span, p.parts));
 			},
 			Expression_::Index(ref indexed, ref index) => {
 				match *index {
@@ -623,13 +623,13 @@ impl<'a> Interpreter<'a> {
 									match *indexed_value_ref {
 										Value::Array(_, ref a) => match a.get(i as usize) {
 											Some(v) => Ok(v),
-											None => return Err(format!("Interpreter error: index out of bounds, {:?}", e.span)),
+											None => return Err(format!("Interpreter error ({}): index out of bounds", e.span)),
 										},
-										_ => return Err(format!("Interpreter error: can't access index on non-array, {:?}", expression.span))
+										_ => return Err(format!("Interpreter error ({}): can't access index on non-array", expression.span))
 									}
 								}
 							},
-							_ => return Err(format!("Interpreter error: invalid index type for array, {:?}", e.span))
+							_ => return Err(format!("Interpreter error ({}): invalid index type for array", e.span))
 						}
 					},
 
@@ -641,7 +641,7 @@ impl<'a> Interpreter<'a> {
 								Value::Array(ref t, ref mut a) => {
 									a.push(
 										match *t {
-											Type::NoType => return Err(format!("Interpreter error: cannot push to untyped array, {:?}", indexed.span)),
+											Type::NoType => return Err(format!("Interpreter error ({}): cannot push to untyped array", indexed.span)),
 											ref array_type => try!(self.default_value((*array_type).clone(), indexed.span.clone())),
 										}
 									);
@@ -649,7 +649,7 @@ impl<'a> Interpreter<'a> {
 									let last_index = a.len() - 1;
 									Ok(a.get(last_index).unwrap())
 								},
-								_ => return Err(format!("Interpreter error: can't push to non-array, {:?}", indexed.span))
+								_ => return Err(format!("Interpreter error ({}): can't push to non-array", indexed.span))
 							}
 						}
 					},
@@ -664,10 +664,10 @@ impl<'a> Interpreter<'a> {
 						Value::Struct(_, ref fields) => {
 							match fields.get(&field.ident) {
 								Some(f) => Ok(f.borrow()),
-				                None => return Err(format!("Interpreter error: unknown struct field, {:?}", field.span)),
+				                None => return Err(format!("Interpreter error ({}): unknown struct field", field.span)),
 							}
 						},
-						_ => return Err(format!("Interpreter error: cannot access field on non-struct, {:?}", expression.span))
+						_ => return Err(format!("Interpreter error ({}): cannot access field on non-struct", expression.span))
 					}
 				}
 			},
@@ -678,14 +678,14 @@ impl<'a> Interpreter<'a> {
 						match try!(self.value_from_expression(context, e)) {
 							Value::Reference(v) => Ok(v),
 							Value::MutReference(v) => Ok(v),
-							_ => return Err(format!("Interpreter error: cannot dereference non-reference, {:?}", expression.span))
+							_ => return Err(format!("Interpreter error ({}): cannot dereference non-reference", expression.span))
 						}
 					},
-					_ => return Err(format!("Interpreter error: cannot get reference for {:?}, {:?}", expression.expr, expression.span))
+					_ => return Err(format!("Interpreter error ({}): cannot get reference for {:?}", expression.span, expression.expr))
 				}
 			},
 
-			_ => return Err(format!("Interpreter error: cannot get reference for {:?}, {:?}", expression.expr, expression.span))
+			_ => return Err(format!("Interpreter error ({}): cannot get reference for {:?}", expression.span, expression.expr))
 		}
 	}
 
@@ -710,7 +710,7 @@ impl<'a> Interpreter<'a> {
 					match array_type {
 						Type::NoType => array_type = value_type,
 						ref t => if value_type != *t {
-							return Err(format!("Interpreter error: heterogeneous types in array literal, {:?}", expression.span))
+							return Err(format!("Interpreter error ({}): heterogeneous types in array literal", expression.span))
 						},
 					};
 
@@ -723,7 +723,7 @@ impl<'a> Interpreter<'a> {
 			Expression_::StructInit(ref p, ref fields) => {
 				let struct_decl = match self.structs.get(p) {
 					Some(s) => s,
-					None => return Err(format!("Interpreter error: unknown struct, {:?}", p.span))
+					None => return Err(format!("Interpreter error ({}): unknown struct", p.span))
 				};
 
 				let mut new_content: std::collections::HashMap<String, Box<Value>> = std::collections::HashMap::new();
@@ -738,7 +738,7 @@ impl<'a> Interpreter<'a> {
 					}
 
 					if !found_field {
-						return Err(format!("Interpreter error: unknown field {:?} in struct init, {:?}", new_field.name, new_field.span))
+						return Err(format!("Interpreter error ({}): unknown field {:?} in struct init", new_field.span, new_field.name))
 					}
 				}
 
@@ -751,7 +751,7 @@ impl<'a> Interpreter<'a> {
 							let value_type = try!(Self::type_from_value(&value, new_field.span.clone()));
 
 							if field.field_type != value_type {
-								return Err(format!("Interpreter error: mismatched types in struct init (got {:?} expected {:?}), {:?}", value_type, field.field_type, new_field.span))
+								return Err(format!("Interpreter error ({}): mismatched types in struct init (got {:?} expected {:?})", new_field.span, value_type, field.field_type))
 							} else {
 								new_content.insert(field.name.clone(), Box::new(value));
 							};
@@ -761,7 +761,7 @@ impl<'a> Interpreter<'a> {
 					}
 
 					if !found_field {
-						return Err(format!("Interpreter error: missing field {:?} in struct init, {:?}", field.name, expression.span))
+						return Err(format!("Interpreter error ({}): missing field {:?} in struct init", expression.span, field.name))
 					}
 				}
 
@@ -780,10 +780,10 @@ impl<'a> Interpreter<'a> {
 					Value::Struct(_, ref fields) => {
 						match fields.get(&field.ident) {
 							Some(f) => Ok(*f.clone()),
-							None => return Err(format!("Interpreter error: unknown struct field, {:?}", field.span)),
+							None => return Err(format!("Interpreter error ({}): unknown struct field", field.span)),
 						}
 					},
-					_ => return Err(format!("Interpreter error: cannot access field on non-struct, {:?}", expression.span))
+					_ => return Err(format!("Interpreter error ({}): cannot access field on non-struct", expression.span))
 				}
 			},
 
@@ -800,13 +800,13 @@ impl<'a> Interpreter<'a> {
 									match *indexed_value_ref {
 										Value::Array(_, ref a) => match a.get(i as usize) {
 											Some(v) => Ok((*v).clone()),
-											None => return Err(format!("Interpreter error: index out of bounds, {:?}", e.span)),
+											None => return Err(format!("Interpreter error ({}): index out of bounds", e.span)),
 										},
-										_ => return Err(format!("Interpreter error: can't access index on non-array, {:?}", expression.span))
+										_ => return Err(format!("Interpreter error ({}): can't access index on non-array", expression.span))
 									}
 								}
 							},
-							_ => return Err(format!("Interpreter error: invalid index type for array, {:?}", e.span))
+							_ => return Err(format!("Interpreter error ({}): invalid index type for array", e.span))
 						}
 					},
 
@@ -818,7 +818,7 @@ impl<'a> Interpreter<'a> {
 								Value::Array(ref t, ref mut a) => {
 									a.push(
 										match *t {
-											Type::NoType => return Err(format!("Interpreter error: cannot push to untyped array, {:?}", indexed.span)),
+											Type::NoType => return Err(format!("Interpreter error ({}): cannot push to untyped array", indexed.span)),
 											ref array_type => try!(self.default_value((*array_type).clone(), indexed.span.clone())),
 										}
 									);
@@ -826,7 +826,7 @@ impl<'a> Interpreter<'a> {
 									let last_index = a.len() - 1;
 									Ok(a.get(last_index).unwrap().clone())
 								},
-								_ => return Err(format!("Interpreter error: can't push to non-array, {:?}", indexed.span))
+								_ => return Err(format!("Interpreter error ({}): can't push to non-array", indexed.span))
 							}
 						}
 					},
@@ -845,14 +845,14 @@ impl<'a> Interpreter<'a> {
 						match try!(self.value_from_expression(context, e)) {
 							Value::Array(_, ref a) => Ok(Value::Integer(a.len() as i64)),
 							Value::String(ref s) => Ok(Value::Integer(s.len() as i64)),
-							_ => return Err(format!("Interpreter error: can't get count on non-(array/string), {:?}", expression.span))
+							_ => return Err(format!("Interpreter error ({}): can't get count on non-(array/string)", expression.span))
 						}
 					},
 					UnOp::Dereference => {
 						match try!(self.value_from_expression(context, e)) {
 							Value::Reference(v) => unsafe { Ok((*v).clone()) },
 							Value::MutReference(v) => unsafe { Ok((*v).clone()) },
-							_ => return Err(format!("Interpreter error: cannot dereference non-reference, {:?}", expression.span))
+							_ => return Err(format!("Interpreter error ({}): cannot dereference non-reference", expression.span))
 						}
 					}
 				}
@@ -863,12 +863,12 @@ impl<'a> Interpreter<'a> {
 					BinOp::Addition => {
 						let integer1 = match try!(self.value_from_expression(context, e1)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error: incorrect expression for addition: {:?}, {:?}", other, e1.span))
+							other => return Err(format!("Interpreter error ({}): incorrect expression for addition: {:?}", e1.span, other))
 						};
 
 						let integer2 = match try!(self.value_from_expression(context, e2)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error: incorrect expression for addition: {:?}, {:?}", other, e2.span))
+							other => return Err(format!("Interpreter error ({}): incorrect expression for addition: {:?}", e2.span, other))
 						};
 
 						Ok(Value::Integer(integer1 + integer2))
@@ -876,12 +876,12 @@ impl<'a> Interpreter<'a> {
 					BinOp::Substraction => {
 						let integer1 = match try!(self.value_from_expression(context, e1)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error: incorrect expression for substraction: {:?}, {:?}", other, e1.span))
+							other => return Err(format!("Interpreter error ({}): incorrect expression for substraction: {:?}", e1.span, other))
 						};
 
 						let integer2 = match try!(self.value_from_expression(context, e2)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error: incorrect expression for substraction: {:?}, {:?}", other, e2.span))
+							other => return Err(format!("Interpreter error ({}): incorrect expression for substraction: {:?}", e2.span, other))
 						};
 
 						Ok(Value::Integer(integer1 - integer2))
@@ -889,12 +889,12 @@ impl<'a> Interpreter<'a> {
 					BinOp::Multiplication => {
 						let integer1 = match try!(self.value_from_expression(context, e1)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error: incorrect expression for multiplication: {:?}, {:?}", other, e1.span))
+							other => return Err(format!("Interpreter error ({}): incorrect expression for multiplication: {:?}", e1.span, other))
 						};
 
 						let integer2 = match try!(self.value_from_expression(context, e2)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error: incorrect expression for multiplication: {:?}, {:?}", other, e2.span))
+							other => return Err(format!("Interpreter error ({}): incorrect expression for multiplication: {:?}", e2.span, other))
 						};
 
 						Ok(Value::Integer(integer1 * integer2))
@@ -902,12 +902,12 @@ impl<'a> Interpreter<'a> {
 					BinOp::Division => {
 						let integer1 = match try!(self.value_from_expression(context, e1)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error: incorrect expression for division: {:?}, {:?}", other, e1.span))
+							other => return Err(format!("Interpreter error ({}): incorrect expression for division: {:?}", e1.span, other))
 						};
 
 						let integer2 = match try!(self.value_from_expression(context, e2)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error: incorrect expression for division: {:?}, {:?}", other, e2.span))
+							other => return Err(format!("Interpreter error ({}): incorrect expression for division: {:?}", e2.span, other))
 						};
 
 						Ok(Value::Integer(integer1 / integer2))
@@ -915,12 +915,12 @@ impl<'a> Interpreter<'a> {
 					BinOp::Modulo => {
 						let integer1 = match try!(self.value_from_expression(context, e1)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error: incorrect expression for modulo: {:?}, {:?}", other, e1.span))
+							other => return Err(format!("Interpreter error ({}): incorrect expression for modulo: {:?}", e1.span, other))
 						};
 
 						let integer2 = match try!(self.value_from_expression(context, e2)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error: incorrect expression for modulo: {:?}, {:?}", other, e2.span))
+							other => return Err(format!("Interpreter error ({}): incorrect expression for modulo: {:?}", e2.span, other))
 						};
 
 						Ok(Value::Integer(integer1 % integer2))
@@ -929,12 +929,12 @@ impl<'a> Interpreter<'a> {
 					BinOp::Concatenation => {
 						let string1 = match try!(self.value_from_expression(context, e1)) {
 							Value::String(s) => s,
-							other => return Err(format!("Interpreter error: incorrect expression for concatenation: {:?}, {:?}", other, e1.span))
+							other => return Err(format!("Interpreter error ({}): incorrect expression for concatenation: {:?}", e1.span, other))
 						};
 
 						let string2 = match try!(self.value_from_expression(context, e2)) {
 							Value::String(s) => s,
-							other => return Err(format!("Interpreter error: incorrect expression for concatenation: {:?}, {:?}", other, e2.span))
+							other => return Err(format!("Interpreter error ({}): incorrect expression for concatenation: {:?}", e2.span, other))
 						};
 
 						let mut new_string = String::new();
@@ -962,7 +962,7 @@ impl<'a> Interpreter<'a> {
 
 	fn builtin_println(&'a self, context: *mut InterpreterContext<'a>, args: &std::vec::Vec<Box<Expression>>, span: Span) -> Result<Value, String> {
 		if args.len() != 1 {
-			return Err(format!("Interpreter error: invalid argument count for println, {:?}", span))
+			return Err(format!("Interpreter error ({}): invalid argument count for println", span))
 		};
 
 		match try!(self.value_from_expression(context, args.get(0).unwrap())) {
@@ -983,7 +983,7 @@ impl<'a> Interpreter<'a> {
 
 	fn builtin_readln(&self, args: &std::vec::Vec<Box<Expression>>, span: Span) -> Result<Value, String> {
 		if args.len() != 0 {
-			return Err(format!("Interpreter error: invalid argument count for readln, {:?}", span))
+			return Err(format!("Interpreter error ({}): invalid argument count for readln", span))
 		};
 
 		let mut line = String::new();
@@ -1004,7 +1004,7 @@ impl<'a> Interpreter<'a> {
 			Type::StructType(ref p) => {
 				let struct_decl = match self.structs.get(p) {
 					Some(s) => s,
-					None => return Err(format!("Interpreter error: unknown struct, {:?}", span))
+					None => return Err(format!("Interpreter error ({}): unknown struct", span))
 				};
 
 				let mut fields: std::collections::HashMap<String, Box<Value>> = std::collections::HashMap::new();
@@ -1015,10 +1015,10 @@ impl<'a> Interpreter<'a> {
 
 				Ok(Value::Struct(p.clone(), fields))
 			},
-			Type::ReferenceType(_) => Err(format!("Interpreter error: no default value for references, {:?}", span)),
-			Type::MutReferenceType(_) => Err(format!("Interpreter error: no default value for mut references, {:?}", span)),
-			Type::FuncType(..) => Err(format!("Interpreter error: no default value for functions, {:?}", span)),
-			Type::NoType => Err(format!("Interpreter error: no default value for nil type, {:?}", span))
+			Type::ReferenceType(_) => Err(format!("Interpreter error ({}): no default value for references", span)),
+			Type::MutReferenceType(_) => Err(format!("Interpreter error ({}): no default value for mut references", span)),
+			Type::FuncType(..) => Err(format!("Interpreter error ({}): no default value for functions", span)),
+			Type::NoType => Err(format!("Interpreter error ({}): no default value for nil type", span))
 		}
 	}
 }

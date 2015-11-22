@@ -27,7 +27,7 @@ fn main() {
         println!("{}", err)
     }
 
-    let mut reader = lexer::Reader::new(s.as_ref());
+    let mut reader = lexer::Reader::new(s.as_ref(), args.get_str("<src>").to_string());
 
     let mut parser = parser::Parser::new(&mut reader);
     let ast_res = parser.parse();

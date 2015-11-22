@@ -22,20 +22,10 @@ impl<'a> Parser<'a> {
 		Parser {
 			reader: reader,
 			ast: Box::new(Ast::new()),
-			last_sp: Span {
-				scol: 0,
-				srow: 0,
-				ecol: 0,
-				erow: 0,
-			},
+			last_sp: Span::nil_span(),
 			current_token: SToken {
 				tok: Token::EOF,
-				sp: Span {
-					scol: 0,
-					srow: 0,
-					ecol: 0,
-					erow: 0,
-				}
+				sp: Span::nil_span(),
 			},
 			just_skept_newline: false,
 		}
@@ -100,7 +90,7 @@ impl<'a> Parser<'a> {
 		} else if let Some(t) = try!(self.accept(Token::Keyword(Keyword::Struct))) {
 			Ok(Statement::StructDecl(try!(self.parse_struct_decl(t.sp))))
 		} else {
-			Err(format!("Parser error: unexpected token {:?}, {:?}", self.current_token.tok, self.current_token.sp))
+			Err(format!("Parser error ({}): unexpected token {:?}", self.current_token.sp, self.current_token.tok))
 		}
 	}
 
@@ -658,7 +648,7 @@ impl<'a> Parser<'a> {
 				} else if let Some(ident_token) = try!(self.accept_any(Token::Identifier("".to_string()))) {
 					try!(self.parse_expression_variable(ident_token))
 				} else {
-					return Err(format!("Parser error: unexpected token {:?}. {:?}", self.current_token.tok, self.current_token.sp))
+					return Err(format!("Parser error ({}): unexpected token {:?}", self.current_token.sp, self.current_token.tok))
 				}
 			},
 		};
@@ -730,6 +720,7 @@ impl<'a> Parser<'a> {
 			srow: self.current_token.sp.srow,
 			ecol: self.current_token.sp.scol, // intended
 			erow: self.current_token.sp.srow, // intended
+			file: self.current_token.sp.file.clone(),
 		};
 
 		while self.current_token.tok == Token::Symbol(Symbol::NewLine) {
@@ -794,14 +785,14 @@ impl<'a> Parser<'a> {
 	fn expect(&mut self, token: Token) -> Result<SToken, String> {
 		match try!(self.accept(token.clone())) {
 			Some(t) => Ok(t),
-			None => Err(format!("Parser error: expected {:?}, {:?}", token, self.current_token.sp)),
+			None => Err(format!("Parser error ({}): expected {:?}", self.current_token.sp, token)),
 		}
 	}
 
 	fn expect_any(&mut self, token: Token) -> Result<SToken, String> {
 		match try!(self.accept_any(token.clone())) {
 			Some(t) => Ok(t),
-			None => Err(format!("Parser error: expected {:?}, {:?}", token, self.current_token.sp)),
+			None => Err(format!("Parser error ({}): expected {:?}", self.current_token.sp, token)),
 		}
 	}
 
