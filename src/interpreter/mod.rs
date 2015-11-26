@@ -230,10 +230,12 @@ impl<'a> Interpreter<'a> {
 	    let ast = try!(parser.parse());
 
 		let mut new_path = current_path.clone();
-		new_path.parts.push(SpannedString {
-			span: import_data.span.clone(),
-			ident: import_data.path.clone(),
-		});
+		for path_part in import_data.path.split("/") {
+			new_path.parts.push(SpannedString {
+				span: import_data.span.clone(),
+				ident: path_part.to_string(),
+			});
+		}
 
 		for statement in &ast.statements {
 			try!(self.execute_statement(statement, new_path.clone()));
