@@ -35,7 +35,7 @@ pub struct PackageData {
 	pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct FuncDeclData {
 	pub span: Span,
 	pub name: String,
@@ -44,7 +44,7 @@ pub struct FuncDeclData {
 	pub statements: std::vec::Vec<BlockStatement>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum BlockStatement {
 	Expression(Box<Expression>),
 	VarDecl(Box<VarDeclData>),
@@ -55,7 +55,7 @@ pub enum BlockStatement {
 	ForIn(Box<ForInData>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct ForInData {
 	pub span: Span,
 	pub element_name: String,
@@ -63,14 +63,14 @@ pub struct ForInData {
 	pub statements: std::vec::Vec<BlockStatement>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct ReturnData {
 	pub span: Span,
 	pub value: Option<Expression>,
 	pub expected_type: Type,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct IfData {
 	pub span: Span,
 	pub condition: Expression,
@@ -78,14 +78,14 @@ pub struct IfData {
 	pub else_statements: Option<std::vec::Vec<BlockStatement>>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct WhileData {
 	pub span: Span,
 	pub condition: Expression,
 	pub statements: std::vec::Vec<BlockStatement>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct VarDeclData {
 	pub span: Span,
 	pub name: String,
@@ -93,7 +93,7 @@ pub struct VarDeclData {
 	pub value: Option<Expression>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct FuncDeclParamData {
 	pub span: Span,
 	pub name: String,
@@ -101,12 +101,13 @@ pub struct FuncDeclParamData {
 	pub default_value: Option<Expression>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
 	NoType,
 	ReferenceType(Box<Type>),
 	MutReferenceType(Box<Type>),
 	ArrayType(Box<Type>),
+	MapType(Box<Type>, Box<Type>),
 	StructType(Path),
 	FuncType(Box<Type>, std::vec::Vec<Box<Type>>),
 	StringType,
@@ -130,13 +131,13 @@ pub struct StructFieldData {
 	pub default_value: Option<Expression>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Expression {
 	pub expr: Expression_,
 	pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expression_ {
 	StringLiteral(String),
 	IntegerLiteral(i64),
@@ -145,6 +146,7 @@ pub enum Expression_ {
 	Variable(Path),
 	StructInit(Path, std::vec::Vec<StructInitFieldData>),
 	Array(std::vec::Vec<Box<Expression>>),
+	Map(Map),
 	FuncCall(Box<Expression>, std::vec::Vec<Box<Expression>>),
 	Field(Box<Expression>, SpannedString),
 	Index(Box<Expression>, Option<Box<Expression>>),
@@ -152,7 +154,21 @@ pub enum Expression_ {
 	BinOp(BinOp, Box<Expression>, Box<Expression>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Map {
+	pub map: std::collections::HashMap<Box<Expression>, Box<Expression>>
+}
+
+impl Hash for Map {
+	fn hash<H>(&self, state: &mut H) where H: Hasher {
+		for (key, value) in &self.map {
+			key.hash(state);
+			value.hash(state);
+		}
+	}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BinOp {
 	Addition,
 	Substraction,
@@ -164,7 +180,7 @@ pub enum BinOp {
 	Concatenation,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UnOp {
 	Reference,
 	MutReference,
@@ -172,13 +188,13 @@ pub enum UnOp {
 	Count,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Op {
 	UnOp(UnOp),
 	BinOp(BinOp),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructInitFieldData {
 	pub span: Span,
 	pub name: SpannedString,

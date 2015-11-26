@@ -8,6 +8,7 @@ use std::io::prelude::*;
 use std::io;
 use std::borrow::Borrow;
 use std::borrow::BorrowMut;
+use std::hash::*;
 
 pub struct Interpreter<'a> {
 	ast: &'a Ast,
@@ -17,7 +18,7 @@ pub struct Interpreter<'a> {
 
 #[derive(Debug)]
 pub struct InterpreterContext<'a> {
-	vars: std::collections::HashMap<String, Variable<'a>>, // TODO: Bloody get rid of Strings for indexing... preferably Path indexing would be best
+	vars: std::collections::HashMap<String, Variable<'a>>,
 }
 
 #[derive(Debug)]
@@ -27,18 +28,47 @@ pub struct Variable<'a> {
 	value: Value<'a>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Value<'a> {
 	Nil,
 	String(String),
 	Integer(i64),
 	Bool(bool),
 	Char(char),
-	Struct(Path, std::collections::HashMap<String, Box<Value<'a>>>),
+	Struct(Path, StructValue<'a>),
 	Array(Type, std::vec::Vec<Value<'a>>),
+	Map(Type, Type, MapValue<'a>),
 	Reference(*const Value<'a>),
 	MutReference(*mut Value<'a>),
 	Func(FuncDeclData),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MapValue<'a> {
+	map: std::collections::HashMap<Value<'a>, Value<'a>>
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StructValue<'a> {
+	map: std::collections::HashMap<String, Value<'a>>
+}
+
+impl<'a> Hash for MapValue<'a> {
+	fn hash<H>(&self, state: &mut H) where H: Hasher {
+		for (key, value) in &self.map {
+			key.hash(state);
+			value.hash(state);
+		}
+	}
+}
+
+impl<'a> Hash for StructValue<'a> {
+	fn hash<H>(&self, state: &mut H) where H: Hasher {
+		for (key, value) in &self.map {
+			key.hash(state);
+			value.hash(state);
+		}
+	}
 }
 
 impl<'a> Interpreter<'a> {
@@ -166,6 +196,15 @@ impl<'a> Interpreter<'a> {
 						param_types.push(Box::new(parameter.param_type.clone()));
 					}
 					Ok(Type::FuncType(Box::new(fd.return_type.clone()), param_types))
+				},
+				Value::Map(ref t1, ref t2, _) => match ((*t1).clone(), (*t2).clone()) {
+					(Type::NoType, Type::NoType) |
+					(_, Type::NoType) |
+					(Type::NoType, _) => Err(format!("Interpreter error ({}): cannot deduce type for empty map", span)),
+					(map_type1, map_type2) => Ok(Type::MapType(
+						Box::new(map_type1),
+						Box::new(map_type2)
+					)),
 				},
 				Value::Nil => Ok(Type::NoType),
 			}
@@ -524,19 +563,33 @@ impl<'a> Interpreter<'a> {
 
 						let index_value = try!(self.value_from_expression(context, e));
 
-						match index_value {
-							Value::Integer(i) => {
-								unsafe {
-									match *indexed_value_p {
-										Value::Array(_, ref mut a) => match a.get_mut(i as usize) {
-											Some(v) => Ok(v),
-											None => return Err(format!("Interpreter error ({}): index out of bounds", e.span)),
+						unsafe {
+							match *indexed_value_p {
+								Value::Array(_, ref mut a) => {
+									match index_value {
+										Value::Integer(i) => {
+											match a.get_mut(i as usize) {
+												Some(v) => Ok(v),
+												None => return Err(format!("Interpreter error ({}): index out of bounds", e.span)),
+											}
 										},
-										_ => return Err(format!("Interpreter error ({}): can't access index on non-array", expression.span))
+										_ => return Err(format!("Interpreter error ({}): invalid index type for array", e.span))
 									}
-								}
-							},
-							_ => return Err(format!("Interpreter error ({}): invalid index type for array", e.span))
+								},
+								Value::Map(ref t, _, ref mut m) => {
+									let index_type = try!(Self::type_from_value(&index_value, e.span.clone()));
+
+									if index_type != *t {
+										return Err(format!("Interpreter error ({}): mismatched index type for map", e.span))
+									} else {
+										match m.map.get_mut(&index_value) {
+											Some(v) => Ok(v),
+											None => return Err(format!("Interpreter error ({}): unknown index", e.span)),
+										}
+									}
+								},
+								_ => return Err(format!("Interpreter error ({}): can't access index on non-(map/array)", expression.span))
+							}
 						}
 					},
 
@@ -568,7 +621,7 @@ impl<'a> Interpreter<'a> {
 				unsafe {
 					match *struct_value_ref {
 						Value::Struct(_, ref mut fields) => {
-							match fields.get_mut(&field.ident) {
+							match fields.map.get_mut(&field.ident) {
 								Some(f) => Ok(f.borrow_mut()),
 				                None => return Err(format!("Interpreter error ({}): unknown struct field", field.span)),
 							}
@@ -617,19 +670,33 @@ impl<'a> Interpreter<'a> {
 
 						let index_value = try!(self.value_from_expression(context, e));
 
-						match index_value {
-							Value::Integer(i) => {
-								unsafe {
-									match *indexed_value_ref {
-										Value::Array(_, ref a) => match a.get(i as usize) {
-											Some(v) => Ok(v),
-											None => return Err(format!("Interpreter error ({}): index out of bounds", e.span)),
+						unsafe {
+							match *indexed_value_ref {
+								Value::Array(_, ref a) => {
+									match index_value {
+										Value::Integer(i) => {
+											match a.get(i as usize) {
+												Some(v) => Ok(v),
+												None => return Err(format!("Interpreter error ({}): index out of bounds", e.span)),
+											}
 										},
-										_ => return Err(format!("Interpreter error ({}): can't access index on non-array", expression.span))
+										_ => return Err(format!("Interpreter error ({}): invalid index type for array", e.span))
 									}
-								}
-							},
-							_ => return Err(format!("Interpreter error ({}): invalid index type for array", e.span))
+								},
+								Value::Map(ref t, _, ref m) => {
+									let index_type = try!(Self::type_from_value(&index_value, e.span.clone()));
+
+									if index_type != *t {
+										return Err(format!("Interpreter error ({}): mismatched index type for map", e.span))
+									} else {
+										match m.map.get(&index_value) {
+											Some(v) => Ok(v),
+											None => return Err(format!("Interpreter error ({}): unknown index", e.span)),
+										}
+									}
+								},
+								_ => return Err(format!("Interpreter error ({}): can't access index on non-(map/array)", expression.span))
+							}
 						}
 					},
 
@@ -662,7 +729,7 @@ impl<'a> Interpreter<'a> {
 				unsafe {
 					match *struct_value_ref {
 						Value::Struct(_, ref fields) => {
-							match fields.get(&field.ident) {
+							match fields.map.get(&field.ident) {
 								Some(f) => Ok(f.borrow()),
 				                None => return Err(format!("Interpreter error ({}): unknown struct field", field.span)),
 							}
@@ -720,13 +787,40 @@ impl<'a> Interpreter<'a> {
 				Ok(Value::Array(array_type, values))
 			},
 
+			Expression_::Map(ref m) => {
+				let mut values = MapValue {
+					map: std::collections::HashMap::new(),
+				};
+				let mut map_type1: Type = Type::NoType;
+				let mut map_type2: Type = Type::NoType;
+				for (key, value) in &m.map {
+					let key_value = try!(self.value_from_expression(context, key));
+					let key_type = try!(Self::type_from_value(&key_value, key.span.clone()));
+					let value_value = try!(self.value_from_expression(context, value));
+					let value_type = try!(Self::type_from_value(&value_value, value.span.clone()));
+					match (map_type1.clone(), map_type2.clone()) {
+						(Type::NoType, Type::NoType) => {
+							map_type1 = key_type.clone();
+							map_type2 = value_type.clone();
+						},
+						(ref t1, ref t2) => if key_type != *t1 || value_type != *t2 {
+							return Err(format!("Interpreter error ({}): heterogeneous types in map literal", expression.span))
+						},
+					};
+
+					values.map.insert(key_value, value_value);
+				}
+
+				Ok(Value::Map(map_type1, map_type2, values))
+			},
+
 			Expression_::StructInit(ref p, ref fields) => {
 				let struct_decl = match self.structs.get(p) {
 					Some(s) => s,
 					None => return Err(format!("Interpreter error ({}): unknown struct", p.span))
 				};
 
-				let mut new_content: std::collections::HashMap<String, Box<Value>> = std::collections::HashMap::new();
+				let mut new_content: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
 
 				for new_field in fields {
 					let mut found_field = false;
@@ -753,7 +847,7 @@ impl<'a> Interpreter<'a> {
 							if field.field_type != value_type {
 								return Err(format!("Interpreter error ({}): mismatched types in struct init (got {:?} expected {:?})", new_field.span, value_type, field.field_type))
 							} else {
-								new_content.insert(field.name.clone(), Box::new(value));
+								new_content.insert(field.name.clone(), value);
 							};
 
 							found_field = true;
@@ -767,7 +861,7 @@ impl<'a> Interpreter<'a> {
 
 				Ok(Value::Struct(
 					p.clone(),
-					new_content,
+					StructValue { map: new_content },
 				))
 			},
 
@@ -778,8 +872,8 @@ impl<'a> Interpreter<'a> {
 			Expression_::Field(ref struct_expr, ref field) => {
 				match try!(self.value_from_expression(context, struct_expr)) {
 					Value::Struct(_, ref fields) => {
-						match fields.get(&field.ident) {
-							Some(f) => Ok(*f.clone()),
+						match fields.map.get(&field.ident) {
+							Some(f) => Ok((*f).clone()),
 							None => return Err(format!("Interpreter error ({}): unknown struct field", field.span)),
 						}
 					},
@@ -794,19 +888,33 @@ impl<'a> Interpreter<'a> {
 
 						let index_value = try!(self.value_from_expression(context, e));
 
-						match index_value {
-							Value::Integer(i) => {
-								unsafe {
-									match *indexed_value_ref {
-										Value::Array(_, ref a) => match a.get(i as usize) {
-											Some(v) => Ok((*v).clone()),
-											None => return Err(format!("Interpreter error ({}): index out of bounds", e.span)),
+						unsafe {
+							match *indexed_value_ref {
+								Value::Array(_, ref a) => {
+									match index_value {
+										Value::Integer(i) => {
+											match a.get(i as usize) {
+												Some(v) => Ok((*v).clone()),
+												None => return Err(format!("Interpreter error ({}): index out of bounds", e.span)),
+											}
 										},
-										_ => return Err(format!("Interpreter error ({}): can't access index on non-array", expression.span))
+										_ => return Err(format!("Interpreter error ({}): invalid index type for array", e.span))
 									}
-								}
-							},
-							_ => return Err(format!("Interpreter error ({}): invalid index type for array", e.span))
+								},
+								Value::Map(ref t, _, ref m) => {
+									let index_type = try!(Self::type_from_value(&index_value, e.span.clone()));
+
+									if index_type != *t {
+										return Err(format!("Interpreter error ({}): mismatched index type for map", e.span))
+									} else {
+										match m.map.get(&index_value) {
+											Some(v) => Ok((*v).clone()),
+											None => return Err(format!("Interpreter error ({}): unknown index", e.span)),
+										}
+									}
+								},
+								_ => return Err(format!("Interpreter error ({}): can't access index on non-(map/array)", expression.span))
+							}
 						}
 					},
 
@@ -972,6 +1080,7 @@ impl<'a> Interpreter<'a> {
 			Value::Char(c) => println!("{}", c),
 			Value::Struct(_, s) => println!("{:?}", s),
 			Value::Array(_, a) => println!("{:?}", a),
+			Value::Map(_, _, m) => println!("{:?}", m),
 			Value::Reference(v) => println!("ref {:?}", v),
 			Value::MutReference(v) => println!("mutref {:?}", v),
 			Value::Func(f) => println!("{:?}", f),
@@ -1001,19 +1110,20 @@ impl<'a> Interpreter<'a> {
 			Type::BoolType => Ok(Value::Bool(false)),
 			Type::CharType => Ok(Value::Char('\0')),
 			Type::ArrayType(t) => Ok(Value::Array(*t, vec![])),
+			Type::MapType(t1, t2) => Ok(Value::Map(*t1, *t2, MapValue { map: std::collections::HashMap::new() })),
 			Type::StructType(ref p) => {
 				let struct_decl = match self.structs.get(p) {
 					Some(s) => s,
 					None => return Err(format!("Interpreter error ({}): unknown struct", span))
 				};
 
-				let mut fields: std::collections::HashMap<String, Box<Value>> = std::collections::HashMap::new();
+				let mut fields: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
 
 				for field in &struct_decl.fields {
-					fields.insert(field.name.clone(), Box::new(try!(self.default_value(field.field_type.clone(), field.span.clone()))));
+					fields.insert(field.name.clone(), try!(self.default_value(field.field_type.clone(), field.span.clone())));
 				}
 
-				Ok(Value::Struct(p.clone(), fields))
+				Ok(Value::Struct(p.clone(), StructValue { map: fields }))
 			},
 			Type::ReferenceType(_) => Err(format!("Interpreter error ({}): no default value for references", span)),
 			Type::MutReferenceType(_) => Err(format!("Interpreter error ({}): no default value for mut references", span)),

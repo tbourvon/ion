@@ -464,11 +464,30 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_expression_struct_init(&mut self, start_sp: Span) -> Result<Expression, String> {
-		let path = try!(self.parse_path(None));
+	fn parse_expression_map(&mut self, start_sp: Span) -> Result<Expression, String> {
+		let mut items = Map {
+			map: std::collections::HashMap::new(),
+		};
 
-		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
+		while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
+			let key = try!(self.parse_expression());
+			try!(self.expect(Token::Symbol(Symbol::Colon)));
+			let value = try!(self.parse_expression());
+			items.map.insert(Box::new(key), Box::new(value));
+			if self.current_token.tok == Token::Symbol(Symbol::RightBrace) {
+				try!(self.accept(Token::Symbol(Symbol::Comma)));
+			} else {
+				try!(self.expect(Token::Symbol(Symbol::Comma)));
+			};
+		};
 
+		Ok(Expression {
+			expr: Expression_::Map(items),
+			span: Span::concat(start_sp, self.last_sp.clone()),
+		})
+	}
+
+	fn parse_expression_struct_init(&mut self, path: Path) -> Result<Expression, String> {
 		let mut fields: std::vec::Vec<StructInitFieldData> = vec![];
 		while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
 			let field_name_token = try!(self.expect_any(Token::Identifier("".to_string())));
@@ -500,11 +519,11 @@ impl<'a> Parser<'a> {
 		};
 
 		Ok(Expression {
+			span: Span::concat(path.span.clone(), self.last_sp.clone()),
 			expr: Expression_::StructInit(
 				path,
 				fields,
 			),
-			span: Span::concat(start_sp, self.last_sp.clone()),
 		})
 
 	}
@@ -615,6 +634,12 @@ impl<'a> Parser<'a> {
 					try!(self.parse_expression_field(expr.span.clone(), expr))
 				} else if try!(self.accept(Token::Symbol(Symbol::LeftBracket))).is_some() {
 					try!(self.parse_expression_index(expr.span.clone(), expr))
+				} else if let Expression_::Variable(p) = expr.expr.clone() { // FIXME: bad cloning...
+					if try!(self.accept(Token::Symbol(Symbol::LeftBrace))).is_some() {
+						try!(self.parse_expression_struct_init(p))
+					} else {
+						return Ok(expr)
+					}
 				} else {
 					return Ok(expr)
 				}
@@ -635,8 +660,8 @@ impl<'a> Parser<'a> {
 					try!(self.parse_expression_unop(s.sp, UnOp::Dereference))
 				} else if let Some(lb) = try!(self.accept(Token::Symbol(Symbol::LeftBracket))) {
 					try!(self.parse_expression_array(lb.sp))
-				} else if let Some(n) = try!(self.accept(Token::Keyword(Keyword::New))) {
-					try!(self.parse_expression_struct_init(n.sp))
+				} else if let Some(lb) = try!(self.accept(Token::Symbol(Symbol::LeftBrace))) {
+					try!(self.parse_expression_map(lb.sp))
 				} else if let Some(sl) = try!(self.accept_any(Token::StringLiteral("".to_string()))) {
 					try!(self.parse_expression_literal(sl))
 				} else if let Some(il) = try!(self.accept_any(Token::IntegerLiteral(0))) {
@@ -698,12 +723,24 @@ impl<'a> Parser<'a> {
 				Box::new(try!(self.parse_type()))
 			))
 		} else if try!(self.accept(Token::Symbol(Symbol::LeftBracket))).is_some() {
-			try!(self.expect(Token::Symbol(Symbol::RightBracket)));
-			let inner_type = try!(self.parse_type());
+			if try!(self.accept(Token::Symbol(Symbol::RightBracket))).is_some() {
+				let inner_type = try!(self.parse_type());
 
-			return Ok(Type::ArrayType(
-				Box::new(inner_type)
-			))
+				return Ok(Type::ArrayType(
+					Box::new(inner_type)
+				))
+			} else {
+				let key_type = try!(self.parse_type());
+
+				try!(self.expect(Token::Symbol(Symbol::RightBracket)));
+
+				let value_type = try!(self.parse_type());
+
+				return Ok(Type::MapType(
+					Box::new(key_type),
+					Box::new(value_type),
+				))
+			}
 		};
 
 		let path = try!(self.parse_path(None));

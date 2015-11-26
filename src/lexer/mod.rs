@@ -15,7 +15,6 @@ pub enum Keyword {
     Return,
     For,
     In,
-    New,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -201,7 +200,6 @@ impl<'a> Reader<'a> {
             "return" => Ok(Token::Keyword(Keyword::Return)),
             "for" => Ok(Token::Keyword(Keyword::For)),
             "in" => Ok(Token::Keyword(Keyword::In)),
-            "new" => Ok(Token::Keyword(Keyword::New)),
             _ => Ok(Token::Identifier(word)),
         }
     }
