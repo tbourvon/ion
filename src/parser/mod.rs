@@ -682,8 +682,8 @@ impl<'a> Parser<'a> {
 			Ok(new_expr)
 		} else {
 			if let Some(binop) = Self::binop_for_token(self.current_token.clone()) {
-				if Self::precedence_for_op(Op::BinOp(binop)) > minimum_precedence {
-					self.parse_expression_(Some(new_expr), minimum_precedence)
+				if Self::precedence_for_op(Op::BinOp(binop.clone())) > minimum_precedence {
+					self.parse_expression_(Some(new_expr), Self::precedence_for_op(Op::BinOp(binop)))
 				} else {
 					Ok(new_expr)
 				}
@@ -691,7 +691,7 @@ impl<'a> Parser<'a> {
 				if self.current_token.tok == Token::Symbol(Symbol::LeftParenthesis) ||
 				   self.current_token.tok == Token::Symbol(Symbol::LeftBracket) ||
 				   self.current_token.tok == Token::Symbol(Symbol::Dot) { // TODO: find a prettier solution
-					self.parse_expression_(Some(new_expr), std::u8::MAX)
+					self.parse_expression_(Some(new_expr), 0)
 				} else {
 					Ok(new_expr)
 				}
@@ -822,14 +822,14 @@ impl<'a> Parser<'a> {
 	fn expect(&mut self, token: Token) -> Result<SToken, String> {
 		match try!(self.accept(token.clone())) {
 			Some(t) => Ok(t),
-			None => Err(format!("Parser error ({}): expected {:?}", self.current_token.sp, token)),
+			None => Err(format!("Parser error ({}): expected {:?}, got {:?}", self.current_token.sp, token, self.current_token.tok)),
 		}
 	}
 
 	fn expect_any(&mut self, token: Token) -> Result<SToken, String> {
 		match try!(self.accept_any(token.clone())) {
 			Some(t) => Ok(t),
-			None => Err(format!("Parser error ({}): expected {:?}", self.current_token.sp, token)),
+			None => Err(format!("Parser error ({}): expected {:?}, got {:?}", self.current_token.sp, token, self.current_token.tok)),
 		}
 	}
 

@@ -274,6 +274,13 @@ impl<'a> Reader<'a> {
                 closed = true;
                 self.next_char();
                 break;
+            } else if escaped {
+                escaped = false;
+                if c == 'n' {
+                    string.push('\n');
+                } else {
+                    return Err(format!("Lexer error ({}): unknown escape character {} in string literal", self.get_current_span(), c));
+                }
             } else {
                 if c == '\n' {
                     self.current_col = 0;

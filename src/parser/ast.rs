@@ -207,6 +207,21 @@ pub struct Path {
 	pub parts: std::vec::Vec<SpannedString>,
 }
 
+impl Path {
+	pub fn concat(path1: Path, path2: Path) -> Path {
+		let mut new_parts = path1.parts.clone();
+
+		for ss in path2.parts {
+			new_parts.push(ss);
+		}
+
+		Path {
+			span: Span::concat(path1.span, path2.span),
+			parts: new_parts,
+		}
+	}
+}
+
 impl PartialEq for Path {
 	fn eq(&self, other: &Self) -> bool {
 		self.parts == other.parts

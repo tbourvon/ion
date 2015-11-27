@@ -1,3 +1,5 @@
+pub mod builtin;
+
 use parser::ast::*;
 use std;
 use lexer;
@@ -5,7 +7,6 @@ use lexer::Span;
 use parser;
 use std::fs::File;
 use std::io::prelude::*;
-use std::io;
 use std::borrow::Borrow;
 use std::borrow::BorrowMut;
 use std::hash::*;
@@ -19,6 +20,7 @@ pub struct Interpreter<'a> {
 #[derive(Debug)]
 pub struct InterpreterContext<'a> {
 	vars: std::collections::HashMap<String, Variable<'a>>,
+	current_path: Path,
 }
 
 #[derive(Debug)]
@@ -40,7 +42,7 @@ pub enum Value<'a> {
 	Map(Type, Type, MapValue<'a>),
 	Reference(*const Value<'a>),
 	MutReference(*mut Value<'a>),
-	Func(FuncDeclData),
+	Func(Path, FuncDeclData),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +93,10 @@ impl<'a> Interpreter<'a> {
 					}],
 				},
 				Value::Func(
+					Path {
+						span: Span::nil_span(),
+						parts: vec![],
+					},
 					FuncDeclData {
 						span: Span::nil_span(),
 						name: name,
@@ -102,7 +108,7 @@ impl<'a> Interpreter<'a> {
 			)
 		};
 
-		inject_func("println".to_string());
+		inject_func("print".to_string());
 		inject_func("readln".to_string());
 	}
 
@@ -139,6 +145,10 @@ impl<'a> Interpreter<'a> {
 
 		let mut context = InterpreterContext {
 			vars: std::collections::HashMap::new(),
+			current_path: Path {
+				span: Span::nil_span(),
+				parts: vec![],
+			}
 		};
 
 		try!(self.value_from_expression(&mut context, &main_func_call_expr));
@@ -155,10 +165,17 @@ impl<'a> Interpreter<'a> {
 					ident: fd.name.clone(),
 				});
 
-				self.funcs.insert(new_path, Value::Func(*fd.clone()));
+				self.funcs.insert(new_path, Value::Func(current_path.clone(), *fd.clone()));
 			},
 			Statement::Import(ref i) => {
-				try!(self.execute_import(i, current_path));
+				if current_path.parts.len() != 0 {
+					let mut import_path = current_path.parts.clone();
+					import_path.pop();
+					try!(self.execute_import(i, Path { span: current_path.span.clone(), parts: import_path }));
+				} else {
+					try!(self.execute_import(i, current_path));
+				}
+
 			}
 			Statement::StructDecl(ref sd) => {
 				let mut new_path = current_path.clone();
@@ -190,7 +207,7 @@ impl<'a> Interpreter<'a> {
 				Value::Struct(ref t, _) => Ok(Type::StructType((*t).clone())),
 				Value::Reference(ref r) => Ok(Type::ReferenceType(Box::new(try!(Self::type_from_value(*r, span))))),
 				Value::MutReference(ref r) => Ok(Type::MutReferenceType(Box::new(try!(Self::type_from_value(*r, span))))),
-				Value::Func(ref fd) => {
+				Value::Func(_, ref fd) => {
 					let mut param_types: std::vec::Vec<Box<Type>> = vec![];
 					for parameter in &fd.parameters {
 						param_types.push(Box::new(parameter.param_type.clone()));
@@ -212,7 +229,7 @@ impl<'a> Interpreter<'a> {
 	}
 
 	fn execute_import(&mut self, import_data: &ImportData, current_path: Path) -> Result<(), String> { // TODO: rework that for more safety and non-naive handling
-		let path_string = import_data.path.clone() + ".ion";
+		let path_string = current_path.parts.iter().fold("".to_string(), |mut acc, ref item| { acc.push_str(item.ident.as_ref()); acc.push_str("/"); acc }) + import_data.path.as_ref() + ".ion";
 	    let path = std::path::Path::new(AsRef::<str>::as_ref(&path_string[..]));
 	    let mut file = match File::open(&path) {
 	        Ok(file) => file,
@@ -366,20 +383,21 @@ impl<'a> Interpreter<'a> {
 			}
 		}
 
-		if is_builtin_func(&func, "println") {
-			self.builtin_println(context, args, span)
+		if is_builtin_func(&func, "print") {
+			self.builtin_print(context, args, span)
 		} else if is_builtin_func(&func, "readln") {
 			self.builtin_readln(args, span)
 		} else {
-			let func_decl = unsafe {
+			let (path, func_decl) = unsafe {
 				match *try!(self.value_p_from_expression(context, &func)) {
-					Value::Func(ref fd) => fd,
+					Value::Func(ref p, ref fd) => ((*p).clone(), fd),
 					_ => return Err(format!("Interpereter error ({}): cannot call non-function", func.span))
 				}
 			};
 
 			let mut local_context = InterpreterContext {
 				vars: std::collections::HashMap::new(),
+				current_path: path,
 			};
 
 			let mut param_count = 0;
@@ -551,9 +569,18 @@ impl<'a> Interpreter<'a> {
 					} }
 				};
 
-				if self.funcs.get(p).is_some() {
-					 return Err(format!("Interpreter error ({}): cannot mutably reference function", p.span));
-				};
+				unsafe {
+					if p.parts.len() == 1 && self.funcs.get(&Path::concat((*context).current_path.clone(), p.clone())).is_some() {
+						 return Err(format!("Interpreter error ({}): cannot mutably reference function", p.span));
+					}
+
+					let mut root_path = (*context).current_path.parts.clone();
+					root_path.pop();
+
+					if self.funcs.get(&Path::concat(Path { span: (*context).current_path.span.clone(), parts: root_path }, p.clone())).is_some() {
+						 return Err(format!("Interpreter error ({}): cannot mutably reference function", p.span));
+					};
+				}
 
 				return Err(format!("Interpreter error ({}): unknown variable {:?}", p.span, p.parts));
 			},
@@ -659,9 +686,20 @@ impl<'a> Interpreter<'a> {
 					} }
 				};
 
-				if let Some(f) = self.funcs.get(p) {
-					 return Ok(f);
-				};
+				unsafe {
+					if p.parts.len() == 1 {
+						if let Some(f) = self.funcs.get(&Path::concat((*context).current_path.clone(), p.clone())) {
+							 return Ok(f);
+						};
+					} else {
+						let mut root_path = (*context).current_path.parts.clone();
+						root_path.pop();
+
+						if let Some(f) = self.funcs.get(&Path::concat(Path { span: (*context).current_path.span.clone(), parts: root_path }, p.clone())) {
+							 return Ok(f);
+						};
+					}
+				}
 
 				return Err(format!("Interpreter error ({}): unknown variable {:?}", p.span, p.parts));
 			},
@@ -1070,40 +1108,7 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn builtin_println(&'a self, context: *mut InterpreterContext<'a>, args: &std::vec::Vec<Box<Expression>>, span: Span) -> Result<Value, String> {
-		if args.len() != 1 {
-			return Err(format!("Interpreter error ({}): invalid argument count for println", span))
-		};
 
-		match try!(self.value_from_expression(context, args.get(0).unwrap())) {
-			Value::String(s) => println!("{}", s),
-			Value::Integer(i) => println!("{}", i),
-			Value::Bool(b) => println!("{}", b),
-			Value::Char(c) => println!("{}", c),
-			Value::Struct(_, s) => println!("{:?}", s),
-			Value::Array(_, a) => println!("{:?}", a),
-			Value::Map(_, _, m) => println!("{:?}", m),
-			Value::Reference(v) => println!("ref {:?}", v),
-			Value::MutReference(v) => println!("mutref {:?}", v),
-			Value::Func(f) => println!("{:?}", f),
-			Value::Nil => println!("nil"),
-		};
-
-		Ok(Value::Nil)
-	}
-
-	fn builtin_readln(&self, args: &std::vec::Vec<Box<Expression>>, span: Span) -> Result<Value, String> {
-		if args.len() != 0 {
-			return Err(format!("Interpreter error ({}): invalid argument count for readln", span))
-		};
-
-		let mut line = String::new();
-	    let stdin = io::stdin();
-	    stdin.lock().read_line(&mut line).unwrap();
-    	Ok(Value::String(
-			line
-		))
-	}
 
 	fn default_value(&self, var_type: Type, span: Span) -> Result<Value, String> {
 		match var_type {
