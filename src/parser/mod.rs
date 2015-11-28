@@ -487,7 +487,11 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_expression_struct_init(&mut self, path: Path) -> Result<Expression, String> {
+	fn parse_expression_struct_init(&mut self, start_sp: Span) -> Result<Expression, String> {
+		let path = try!(self.parse_path(None));
+
+		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
+
 		let mut fields: std::vec::Vec<StructInitFieldData> = vec![];
 		while try!(self.accept(Token::Symbol(Symbol::RightBrace))).is_none() {
 			let field_name_token = try!(self.expect_any(Token::Identifier("".to_string())));
@@ -519,7 +523,7 @@ impl<'a> Parser<'a> {
 		};
 
 		Ok(Expression {
-			span: Span::concat(path.span.clone(), self.last_sp.clone()),
+			span: Span::concat(start_sp, self.last_sp.clone()),
 			expr: Expression_::StructInit(
 				path,
 				fields,
@@ -634,12 +638,6 @@ impl<'a> Parser<'a> {
 					try!(self.parse_expression_field(expr.span.clone(), expr))
 				} else if try!(self.accept(Token::Symbol(Symbol::LeftBracket))).is_some() {
 					try!(self.parse_expression_index(expr.span.clone(), expr))
-				} else if let Expression_::Variable(p) = expr.expr.clone() { // FIXME: bad cloning...
-					if try!(self.accept(Token::Symbol(Symbol::LeftBrace))).is_some() {
-						try!(self.parse_expression_struct_init(p))
-					} else {
-						return Ok(expr)
-					}
 				} else {
 					return Ok(expr)
 				}
@@ -672,6 +670,8 @@ impl<'a> Parser<'a> {
 					try!(self.parse_expression_literal(cl))
 				} else if let Some(ident_token) = try!(self.accept_any(Token::Identifier("".to_string()))) {
 					try!(self.parse_expression_variable(ident_token))
+				} else if let Some(n) = try!(self.accept_any(Token::Keyword(Keyword::New))) {
+					try!(self.parse_expression_struct_init(n.sp))
 				} else {
 					return Err(format!("Parser error ({}): unexpected token {:?}", self.current_token.sp, self.current_token.tok))
 				}
