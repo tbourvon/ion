@@ -1,0 +1,9 @@
+import "conv"
+
+func println(input: string) {
+	print(input <> "\n")
+}
+
+func read_int() -> int {
+	return conv::str_to_int(readln())
+}

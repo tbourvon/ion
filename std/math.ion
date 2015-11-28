@@ -1,0 +1,10 @@
+func pow(a: int, b: int) -> int {
+	var res: int = 1
+	var i: int = 0
+	while i != b {
+		res = res * a
+		i = i + 1
+	}
+
+	return res
+}

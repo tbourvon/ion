@@ -144,3 +144,5 @@ func main {
 ```
 ion my_source_file.ion
 ```
+
+Note: for now, your files have to be placed alongside the executable, as well as the std folder.
