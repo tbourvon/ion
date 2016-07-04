@@ -7,7 +7,59 @@ use lexer::Span;
 use lexer::Reader;
 use lexer::Keyword;
 use lexer::Symbol;
+use lexer;
 use self::ast::*;
+use std::error::Error as BaseError;
+use std::fmt::Display;
+use std::fmt;
+
+#[derive(Debug, Clone)]
+pub struct Error {
+    pub kind: ErrorKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum ErrorKind {
+	Unknown,
+	Lexer(lexer::Error),
+    UnexpectedToken(Token),
+	ExpectedGotToken(Token, Token),
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		if let ErrorKind::Lexer(ref e) = self.kind {
+			e.fmt(f)
+		} else {
+	        write!(f, "{}: {}", self.span,
+	            match self.kind {
+	                ErrorKind::Unknown => self.description().to_string(),
+					ErrorKind::UnexpectedToken(ref t) => format!("unexpected token {:?}", t),
+					ErrorKind::ExpectedGotToken(ref e, ref g) => format!("expected {:?}, got {:?}", e, g),
+                    _ => self.description().to_string(),
+	            }
+	        )
+		}
+    }
+}
+
+impl BaseError for Error {
+    fn description(&self) -> &str {
+        match self.kind {
+            ErrorKind::Unknown => "unknown error",
+			ErrorKind::Lexer(ref e) => e.description(),
+			ErrorKind::UnexpectedToken(_) => "unexpected token",
+			ErrorKind::ExpectedGotToken(_, _) => "expected a token, got another",
+        }
+    }
+
+    fn cause(&self) -> Option<&std::error::Error> {
+        None
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct Parser<'a> {
 	reader: &'a mut Reader<'a>,
@@ -31,7 +83,7 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	pub fn parse(&mut self) -> Result<&Ast, String> {
+	pub fn parse(&mut self) -> Result<&Ast> {
 		try!(self.next_token());
 		while self.current_token.tok != Token::EOF {
 			let statement = try!(self.parse_statement());
@@ -41,18 +93,18 @@ impl<'a> Parser<'a> {
 		Ok(&self.ast)
 	}
 
-	fn binop_for_token(stoken: SToken) -> Option<BinOp> {
+	fn binop_for_token(stoken: SToken) -> Option<BinaryOp> {
 		match stoken.tok.clone() {
 			Token::Symbol(s) => {
 				let binop = match s {
-					Symbol::Plus => BinOp::Addition,
-					Symbol::Minus => BinOp::Substraction,
-					Symbol::Star => BinOp::Multiplication,
-					Symbol::Over => BinOp::Division,
-					Symbol::Modulo => BinOp::Modulo,
-					Symbol::Concat => BinOp::Concatenation,
-					Symbol::EqualEqual => BinOp::Equality,
-					Symbol::NotEqual => BinOp::Inequality,
+					Symbol::Plus => BinaryOp::Addition,
+					Symbol::Minus => BinaryOp::Substraction,
+					Symbol::Star => BinaryOp::Multiplication,
+					Symbol::Over => BinaryOp::Division,
+					Symbol::Modulo => BinaryOp::Modulo,
+					Symbol::Concat => BinaryOp::Concatenation,
+					Symbol::EqualEqual => BinaryOp::Equality,
+					Symbol::NotEqual => BinaryOp::Inequality,
 					_ => return None
 				};
 
@@ -64,23 +116,23 @@ impl<'a> Parser<'a> {
 
 	fn precedence_for_op(op: Op) -> u8 {
 		match op {
-			Op::UnOp(_) => std::u8::MAX,
-			Op::BinOp(binop) => {
+			Op::Unary(_) => std::u8::MAX,
+			Op::Binary(binop) => {
 				match binop {
-					BinOp::Equality |
-					BinOp::Inequality => 1,
-					BinOp::Addition |
-					BinOp::Substraction |
-					BinOp::Concatenation => 2,
-					BinOp::Multiplication |
-					BinOp::Division |
-					BinOp::Modulo => 3,
+					BinaryOp::Equality |
+					BinaryOp::Inequality => 1,
+					BinaryOp::Addition |
+					BinaryOp::Substraction |
+					BinaryOp::Concatenation => 2,
+					BinaryOp::Multiplication |
+					BinaryOp::Division |
+					BinaryOp::Modulo => 3,
 				}
 			},
 		}
 	}
 
-	fn parse_statement(&mut self) -> Result<Statement, String> {
+	fn parse_statement(&mut self) -> Result<Statement> {
 		if let Some(t) = try!(self.accept(Token::Keyword(Keyword::Import))) {
 			Ok(Statement::Import(try!(self.parse_import(t.sp))))
 		} else if let Some(t) = try!(self.accept(Token::Keyword(Keyword::Package))) {
@@ -90,11 +142,11 @@ impl<'a> Parser<'a> {
 		} else if let Some(t) = try!(self.accept(Token::Keyword(Keyword::Struct))) {
 			Ok(Statement::StructDecl(try!(self.parse_struct_decl(t.sp))))
 		} else {
-			Err(format!("Parser error ({}): unexpected token {:?}", self.current_token.sp, self.current_token.tok))
+			Err(Error { kind: ErrorKind::UnexpectedToken(self.current_token.tok.clone()), span: self.current_token.sp.clone() })
 		}
 	}
 
-	fn parse_package(&mut self, start_sp: Span) -> Result<Box<PackageData>, String> {
+	fn parse_package(&mut self, start_sp: Span) -> Result<Box<PackageData>> {
 		let name_token = try!(self.expect_any(Token::Identifier("".to_string())));
 		match name_token.tok {
 			Token::Identifier(n) => {
@@ -105,11 +157,11 @@ impl<'a> Parser<'a> {
 					}
 				))
 			},
-			_ => Err("".to_string()), // Should never happen
+			_ => Err(Error { kind: ErrorKind::Unknown, span: name_token.sp }), // Should never happen
 		}
 	}
 
-	fn parse_import(&mut self, start_sp: Span) ->  Result<Box<ImportData>, String> {
+	fn parse_import(&mut self, start_sp: Span) -> Result<Box<ImportData>> {
 		let path_token = try!(self.expect_any(Token::StringLiteral("".to_string())));
 		match path_token.tok {
 			Token::StringLiteral(p) => {
@@ -120,15 +172,15 @@ impl<'a> Parser<'a> {
 					}
 				))
 			},
-			_ => Err("".to_string()), // Should never happen
+			_ => Err(Error { kind: ErrorKind::Unknown, span: path_token.sp }), // Should never happen
 		}
 	}
 
-	fn parse_func_decl(&mut self, start_sp: Span) -> Result<Box<FuncDeclData>, String> {
+	fn parse_func_decl(&mut self, start_sp: Span) -> Result<Box<FuncDeclData>> {
 		let name_token = try!(self.expect_any(Token::Identifier("".to_string())));
 		let name = match name_token.tok {
 			Token::Identifier(s) => s,
-			_ => return Err("".to_string()), // Should never happen
+			_ => return Err(Error { kind: ErrorKind::Unknown, span: name_token.sp }), // Should never happen
 		};
 
 		try!(self.expect(Token::Symbol(Symbol::LeftParenthesis)));
@@ -138,7 +190,7 @@ impl<'a> Parser<'a> {
 			let arg_name_token = try!(self.expect_any(Token::Identifier("".to_string())));
 			let arg_name = match arg_name_token.tok {
 				Token::Identifier(s) => s,
-				_ => return Err("".to_string()), // Should never happen
+				_ => return Err(Error { kind: ErrorKind::Unknown, span: arg_name_token.sp }), // Should never happen
 			};
 
 			try!(self.expect(Token::Symbol(Symbol::Colon)));
@@ -163,10 +215,11 @@ impl<'a> Parser<'a> {
 			};
 		};
 
-		let mut return_type: Type = Type::NoType;
-		if try!(self.accept(Token::Symbol(Symbol::Return))).is_some() {
-			return_type = try!(self.parse_type());
-		}
+		let return_type = if try!(self.accept(Token::Symbol(Symbol::Return))).is_some() {
+			try!(self.parse_type())
+		} else {
+			Type::None
+		};
 
 		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
 
@@ -186,11 +239,11 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_struct_decl(&mut self, start_sp: Span) -> Result<Box<StructDeclData>, String> {
+	fn parse_struct_decl(&mut self, start_sp: Span) -> Result<Box<StructDeclData>> {
 		let name_token = try!(self.expect_any(Token::Identifier("".to_string())));
 		let name = match name_token.tok {
 			Token::Identifier(s) => s,
-			_ => return Err("".to_string()), // Should never happen
+			_ => return Err(Error { kind: ErrorKind::Unknown, span: name_token.sp }), // Should never happen
 		};
 
 		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
@@ -200,7 +253,7 @@ impl<'a> Parser<'a> {
 			let field_name_token = try!(self.expect_any(Token::Identifier("".to_string())));
 			let field_name = match field_name_token.tok {
 				Token::Identifier(s) => s,
-				_ => return Err("".to_string()), // Should never happen
+				_ => return Err(Error { kind: ErrorKind::Unknown, span: field_name_token.sp }), // Should never happen
 			};
 
 			try!(self.expect(Token::Symbol(Symbol::Colon)));
@@ -234,7 +287,7 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_block_statement(&mut self, return_type: Type) -> Result<BlockStatement, String> {
+	fn parse_block_statement(&mut self, return_type: Type) -> Result<BlockStatement> {
 		if let Some(t) = try!(self.accept(Token::Keyword(Keyword::Var))) {
 			Ok(BlockStatement::VarDecl(try!(self.parse_var_decl(t.sp))))
 		} else if let Some(t) = try!(self.accept(Token::Keyword(Keyword::If))) {
@@ -259,11 +312,11 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn parse_forin(&mut self, return_type: Type, start_sp: Span) -> Result<Box<ForInData>, String> {
+	fn parse_forin(&mut self, return_type: Type, start_sp: Span) -> Result<Box<ForInData>> {
 		let element_token = try!(self.expect_any(Token::Identifier("".to_string())));
 		let element_name = match element_token.tok {
 			Token::Identifier(s) => s,
-			_ => return Err("".to_string()), // Should never happen
+			_ => return Err(Error { kind: ErrorKind::Unknown, span: element_token.sp }), // Should never happen
 		};
 
 		try!(self.expect(Token::Keyword(Keyword::In)));
@@ -287,11 +340,11 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_return(&mut self, return_type: Type, start_sp: Span) -> Result<Box<ReturnData>, String> {
+	fn parse_return(&mut self, return_type: Type, start_sp: Span) -> Result<Box<ReturnData>> {
 		Ok(Box::new(
 			ReturnData {
 				value: match return_type {
-					Type::NoType => None,
+					Type::None => None,
 					_ => Some(try!(self.parse_expression())),
 				},
 				span: Span::concat(start_sp, self.last_sp.clone()),
@@ -300,7 +353,7 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_if(&mut self, return_type: Type, start_sp: Span) -> Result<Box<IfData>, String> {
+	fn parse_if(&mut self, return_type: Type, start_sp: Span) -> Result<Box<IfData>> {
 		let condition = try!(self.parse_expression());
 
 		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
@@ -310,8 +363,7 @@ impl<'a> Parser<'a> {
 			if_statements.push(try!(self.parse_block_statement(return_type.clone())));
 		};
 
-		let mut else_statements_opt: Option<std::vec::Vec<BlockStatement>> = None;
-		if try!(self.accept(Token::Keyword(Keyword::Else))).is_some() {
+		let else_statements_opt = if try!(self.accept(Token::Keyword(Keyword::Else))).is_some() {
 			let mut else_statements: std::vec::Vec<BlockStatement> = vec![];
 			if let Some(t) = try!(self.accept(Token::Keyword(Keyword::If))) {
 				else_statements.push(BlockStatement::If(try!(self.parse_if(return_type.clone(), t.sp))));
@@ -322,8 +374,10 @@ impl<'a> Parser<'a> {
 				};
 			}
 
-			else_statements_opt = Some(else_statements);
-		}
+			Some(else_statements)
+		} else {
+			None
+		};
 
 		Ok(Box::new(
 			IfData {
@@ -335,7 +389,7 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_while(&mut self, return_type: Type, start_sp: Span) -> Result<Box<WhileData>, String> {
+	fn parse_while(&mut self, return_type: Type, start_sp: Span) -> Result<Box<WhileData>> {
 		let condition = try!(self.parse_expression());
 
 		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
@@ -354,11 +408,11 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_var_decl(&mut self, start_sp: Span) -> Result<Box<VarDeclData>, String> {
+	fn parse_var_decl(&mut self, start_sp: Span) -> Result<Box<VarDeclData>> {
 		let name_token = try!(self.expect_any(Token::Identifier("".to_string())));
 		let name = match name_token.tok {
 			Token::Identifier(i) => i,
-			_ => return Err("".to_string()), // Should never happen
+			_ => return Err(Error { kind: ErrorKind::Unknown, span: name_token.sp }), // Should never happen
 		};
 
 		try!(self.expect(Token::Symbol(Symbol::Colon)));
@@ -381,7 +435,7 @@ impl<'a> Parser<'a> {
 		))
 	}
 
-	fn parse_path(&mut self, first_part: Option<SToken>) -> Result<Path, String> {
+	fn parse_path(&mut self, first_part: Option<SToken>) -> Result<Path> {
 		let mut parts: std::vec::Vec<SpannedString> = vec![];
 
 		let ident_token = match first_part {
@@ -391,7 +445,7 @@ impl<'a> Parser<'a> {
 
 		let ident = match ident_token.tok {
 			Token::Identifier(i) => i,
-			_ => return Err("".to_string()) // Should never happen
+			_ => return Err(Error { kind: ErrorKind::Unknown, span: ident_token.sp }) // Should never happen
 		};
 
 		parts.push(SpannedString {
@@ -403,7 +457,7 @@ impl<'a> Parser<'a> {
 			let next_path_token = try!(self.expect_any(Token::Identifier("".to_string())));
 			let next_path = match next_path_token.tok {
 				Token::Identifier(id) => id,
-				_ => return Err("".to_string()) // Should never happen
+				_ => return Err(Error { kind: ErrorKind::Unknown, span: next_path_token.sp }) // Should never happen
 			};
 
 			parts.push(
@@ -420,34 +474,34 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_expression_binop(&mut self, start_sp: Span, binop: BinOp, lhs: Expression) -> Result<Expression, String> {
+	fn parse_expression_binop(&mut self, start_sp: Span, binop: BinaryOp, lhs: Expression) -> Result<Expression> {
 		Ok(Expression {
-			expr: Expression_::BinOp(
+			expr: Expression_::BinaryOp(
 				binop.clone(),
 				Box::new(
 					lhs
 				),
 				Box::new(
-					try!(self.parse_expression_(None, Self::precedence_for_op(Op::BinOp(binop))))
+					try!(self.parse_expression_(None, Self::precedence_for_op(Op::Binary(binop))))
 				)
 			),
 			span: Span::concat(start_sp, self.last_sp.clone()),
 		})
 	}
 
-	fn parse_expression_unop(&mut self, start_sp: Span, unop: UnOp) -> Result<Expression, String> {
+	fn parse_expression_unop(&mut self, start_sp: Span, unop: UnaryOp) -> Result<Expression> {
 		Ok(Expression {
-			expr: Expression_::UnOp(
+			expr: Expression_::UnaryOp(
 				unop.clone(),
 				Box::new(
-					try!(self.parse_expression_(None, Self::precedence_for_op(Op::UnOp(unop))))
+					try!(self.parse_expression_(None, Self::precedence_for_op(Op::Unary(unop))))
 				)
 			),
 			span: Span::concat(start_sp, self.last_sp.clone()),
 		})
 	}
 
-	fn parse_expression_array(&mut self, start_sp: Span) -> Result<Expression, String> {
+	fn parse_expression_array(&mut self, start_sp: Span) -> Result<Expression> {
 		let mut items: std::vec::Vec<Box<Expression>> = vec![];
 		while try!(self.accept(Token::Symbol(Symbol::RightBracket))).is_none() {
 			items.push(Box::new(try!(self.parse_expression())));
@@ -464,7 +518,7 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_expression_map(&mut self, start_sp: Span) -> Result<Expression, String> {
+	fn parse_expression_map(&mut self, start_sp: Span) -> Result<Expression> {
 		let mut items = Map {
 			map: std::collections::HashMap::new(),
 		};
@@ -487,7 +541,7 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_expression_struct_init(&mut self, start_sp: Span) -> Result<Expression, String> {
+	fn parse_expression_struct_init(&mut self, start_sp: Span) -> Result<Expression> {
 		let path = try!(self.parse_path(None));
 
 		try!(self.expect(Token::Symbol(Symbol::LeftBrace)));
@@ -497,7 +551,7 @@ impl<'a> Parser<'a> {
 			let field_name_token = try!(self.expect_any(Token::Identifier("".to_string())));
 			let field_name = match field_name_token.tok {
 				Token::Identifier(s) => s,
-				_ => return Err("".to_string()), // Should never happen
+				_ => return Err(Error { kind: ErrorKind::Unknown, span: field_name_token.sp }), // Should never happen
 			};
 
 			try!(self.expect(Token::Symbol(Symbol::Colon)));
@@ -532,13 +586,13 @@ impl<'a> Parser<'a> {
 
 	}
 
-	fn parse_expression_literal(&mut self, stoken: SToken) -> Result<Expression, String> {
+	fn parse_expression_literal(&mut self, stoken: SToken) -> Result<Expression> {
 		let expr = match stoken.tok {
 			Token::StringLiteral(s) => Expression_::StringLiteral(s),
 			Token::IntegerLiteral(i) => Expression_::IntegerLiteral(i),
 			Token::BoolLiteral(b) => Expression_::BoolLiteral(b),
 			Token::CharLiteral(c) => Expression_::CharLiteral(c),
-			_ => return Err("".to_string()) // Should never happen
+			_ => return Err(Error { kind: ErrorKind::Unknown, span: stoken.sp }) // Should never happen
 		};
 
 		Ok(Expression {
@@ -547,7 +601,7 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_expression_func_call(&mut self, start_sp: Span, func_expr: Expression) -> Result<Expression, String> {
+	fn parse_expression_func_call(&mut self, start_sp: Span, func_expr: Expression) -> Result<Expression> {
 		let mut args: std::vec::Vec<Box<Expression>> = vec![];
 		while try!(self.accept(Token::Symbol(Symbol::RightParenthesis))).is_none() {
 			args.push(Box::new(try!(self.parse_expression())));
@@ -565,11 +619,11 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_expression_field(&mut self, start_sp: Span, struct_expr: Expression) -> Result<Expression, String> {
+	fn parse_expression_field(&mut self, start_sp: Span, struct_expr: Expression) -> Result<Expression> {
 		let field_token = try!(self.expect_any(Token::Identifier("".to_string())));
 		let field = match field_token.tok {
 			Token::Identifier(i) => i,
-			_ => return Err("".to_string()) // Should never happen
+			_ => return Err(Error { kind: ErrorKind::Unknown, span: field_token.sp }) // Should never happen
 		};
 
 		Ok(Expression {
@@ -584,7 +638,7 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_expression_index(&mut self, start_sp: Span, indexable_expr: Expression) -> Result<Expression, String> {
+	fn parse_expression_index(&mut self, start_sp: Span, indexable_expr: Expression) -> Result<Expression> {
 		let index = if try!(self.accept(Token::Symbol(Symbol::RightBracket))).is_some() {
 			None
 		} else {
@@ -600,7 +654,7 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_expression_variable(&mut self, stoken: SToken) -> Result<Expression, String> {
+	fn parse_expression_variable(&mut self, stoken: SToken) -> Result<Expression> {
 		let path = try!(self.parse_path(Some(stoken)));
 
 		Ok(Expression {
@@ -609,29 +663,30 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_expression(&mut self) -> Result<Expression, String> {
+	fn parse_expression(&mut self) -> Result<Expression,> {
 		self.parse_expression_(None, 0)
 	}
 
-	fn parse_expression_(&mut self, prev_expr: Option<Expression>, minimum_precedence: u8) -> Result<Expression, String> {
+	#[allow(cyclomatic_complexity)]
+	fn parse_expression_(&mut self, prev_expr: Option<Expression>, minimum_precedence: u8) -> Result<Expression> {
 		let new_expr = match prev_expr {
 			Some(expr) => {
 				if try!(self.accept(Token::Symbol(Symbol::Plus))).is_some() {
-					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Addition, expr))
+					try!(self.parse_expression_binop(expr.span.clone(), BinaryOp::Addition, expr))
 				} else if try!(self.accept(Token::Symbol(Symbol::Minus))).is_some() {
-					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Substraction, expr))
+					try!(self.parse_expression_binop(expr.span.clone(), BinaryOp::Substraction, expr))
 				} else if try!(self.accept(Token::Symbol(Symbol::Star))).is_some() {
-					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Multiplication, expr))
+					try!(self.parse_expression_binop(expr.span.clone(), BinaryOp::Multiplication, expr))
 				} else if try!(self.accept(Token::Symbol(Symbol::Over))).is_some() {
-					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Division, expr))
+					try!(self.parse_expression_binop(expr.span.clone(), BinaryOp::Division, expr))
 				} else if try!(self.accept(Token::Symbol(Symbol::Modulo))).is_some() {
-					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Modulo, expr))
+					try!(self.parse_expression_binop(expr.span.clone(), BinaryOp::Modulo, expr))
 				} else if try!(self.accept(Token::Symbol(Symbol::EqualEqual))).is_some() {
-					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Equality, expr))
+					try!(self.parse_expression_binop(expr.span.clone(), BinaryOp::Equality, expr))
 				} else if try!(self.accept(Token::Symbol(Symbol::NotEqual))).is_some() {
-					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Inequality, expr))
+					try!(self.parse_expression_binop(expr.span.clone(), BinaryOp::Inequality, expr))
 				} else if try!(self.accept(Token::Symbol(Symbol::Concat))).is_some() {
-					try!(self.parse_expression_binop(expr.span.clone(), BinOp::Concatenation, expr))
+					try!(self.parse_expression_binop(expr.span.clone(), BinaryOp::Concatenation, expr))
 				} else if try!(self.accept(Token::Symbol(Symbol::LeftParenthesis))).is_some() {
 					try!(self.parse_expression_func_call(expr.span.clone(), expr))
 				} else if try!(self.accept(Token::Symbol(Symbol::Dot))).is_some() {
@@ -649,13 +704,13 @@ impl<'a> Parser<'a> {
 
 					e
 				} else if let Some(h) = try!(self.accept(Token::Symbol(Symbol::Hash))) {
-					try!(self.parse_expression_unop(h.sp, UnOp::Count))
+					try!(self.parse_expression_unop(h.sp, UnaryOp::Count))
 				} else if let Some(a) = try!(self.accept(Token::Symbol(Symbol::Amp))) {
-					try!(self.parse_expression_unop(a.sp, UnOp::Reference))
+					try!(self.parse_expression_unop(a.sp, UnaryOp::Reference))
 				} else if let Some(a) = try!(self.accept(Token::Symbol(Symbol::At))) {
-					try!(self.parse_expression_unop(a.sp, UnOp::MutReference))
+					try!(self.parse_expression_unop(a.sp, UnaryOp::MutReference))
 				} else if let Some(s) = try!(self.accept(Token::Symbol(Symbol::Star))) {
-					try!(self.parse_expression_unop(s.sp, UnOp::Dereference))
+					try!(self.parse_expression_unop(s.sp, UnaryOp::Dereference))
 				} else if let Some(lb) = try!(self.accept(Token::Symbol(Symbol::LeftBracket))) {
 					try!(self.parse_expression_array(lb.sp))
 				} else if let Some(lb) = try!(self.accept(Token::Symbol(Symbol::LeftBrace))) {
@@ -673,7 +728,7 @@ impl<'a> Parser<'a> {
 				} else if let Some(n) = try!(self.accept_any(Token::Keyword(Keyword::New))) {
 					try!(self.parse_expression_struct_init(n.sp))
 				} else {
-					return Err(format!("Parser error ({}): unexpected token {:?}", self.current_token.sp, self.current_token.tok))
+					return Err(Error { kind: ErrorKind::UnexpectedToken(self.current_token.tok.clone()), span: self.current_token.sp.clone() })
 				}
 			},
 		};
@@ -682,8 +737,8 @@ impl<'a> Parser<'a> {
 			Ok(new_expr)
 		} else {
 			if let Some(binop) = Self::binop_for_token(self.current_token.clone()) {
-				if Self::precedence_for_op(Op::BinOp(binop.clone())) > minimum_precedence {
-					self.parse_expression_(Some(new_expr), Self::precedence_for_op(Op::BinOp(binop)))
+				if Self::precedence_for_op(Op::Binary(binop.clone())) > minimum_precedence {
+					self.parse_expression_(Some(new_expr), Self::precedence_for_op(Op::Binary(binop)))
 				} else {
 					Ok(new_expr)
 				}
@@ -699,34 +754,34 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn parse_type(&mut self) -> Result<Type, String> {
+	fn parse_type(&mut self) -> Result<Type> {
 		fn get_builtin_type(path: &Path) -> Option<Type> {
 			if path.parts.len() != 1 {
 				None
 			} else {
 				match path.parts.get(0).unwrap().ident.as_ref() {
-					"int" => Some(Type::IntType),
-					"bool" => Some(Type::BoolType),
-					"char" => Some(Type::CharType),
-					"string" => Some(Type::StringType),
+					"int" => Some(Type::Int),
+					"bool" => Some(Type::Bool),
+					"char" => Some(Type::Char),
+					"string" => Some(Type::String),
 					_ => None,
 				}
 			}
 		}
 
 		if try!(self.accept(Token::Symbol(Symbol::Amp))).is_some() {
-			return Ok(Type::ReferenceType(
+			return Ok(Type::Reference(
 				Box::new(try!(self.parse_type()))
 			))
 		} else if try!(self.accept(Token::Symbol(Symbol::At))).is_some() {
-			return Ok(Type::MutReferenceType(
+			return Ok(Type::MutReference(
 				Box::new(try!(self.parse_type()))
 			))
 		} else if try!(self.accept(Token::Symbol(Symbol::LeftBracket))).is_some() {
 			if try!(self.accept(Token::Symbol(Symbol::RightBracket))).is_some() {
 				let inner_type = try!(self.parse_type());
 
-				return Ok(Type::ArrayType(
+				return Ok(Type::Array(
 					Box::new(inner_type)
 				))
 			} else {
@@ -736,7 +791,7 @@ impl<'a> Parser<'a> {
 
 				let value_type = try!(self.parse_type());
 
-				return Ok(Type::MapType(
+				return Ok(Type::Map(
 					Box::new(key_type),
 					Box::new(value_type),
 				))
@@ -747,11 +802,11 @@ impl<'a> Parser<'a> {
 
 		match get_builtin_type(&path) {
 			Some(t) => Ok(t),
-			None => Ok(Type::StructType(path)),
+			None => Ok(Type::Struct(path)),
 		}
 	}
 
-	fn skip_newlines(&mut self) -> Result<Span, String> {
+	fn skip_newlines(&mut self) -> Result<Span> {
 		let mut sp = Span {
 			scol: self.current_token.sp.scol,
 			srow: self.current_token.sp.srow,
@@ -769,7 +824,7 @@ impl<'a> Parser<'a> {
 		Ok(sp)
 	}
 
-	fn accept(&mut self, mtoken: Token) -> Result<Option<SToken>, String> {
+	fn accept(&mut self, mtoken: Token) -> Result<Option<SToken>> {
 		// TODO: use intrinsics with determinants, but unstable for now. Could also use macros
 		// around enums to be able to automatically expand them into a match, but would be too
 		// invasive.
@@ -780,7 +835,7 @@ impl<'a> Parser<'a> {
 			(Token::StringLiteral(ref a), Token::StringLiteral(ref b)) if (a == b) => Some(self.current_token.clone()),
 			(Token::CharLiteral(ref a), Token::CharLiteral(ref b)) if (a == b) => Some(self.current_token.clone()),
 			(Token::IntegerLiteral(ref a), Token::IntegerLiteral(ref b)) if (a == b) => Some(self.current_token.clone()),
-			(Token::FloatLiteral(ref a), Token::FloatLiteral(ref b)) if (a == b) => Some(self.current_token.clone()),
+			(Token::FloatLiteral(ref a), Token::FloatLiteral(ref b)) if (a - b).abs() < std::f64::EPSILON => Some(self.current_token.clone()),
 			(Token::BoolLiteral(ref a), Token::BoolLiteral(ref b)) if (a == b) => Some(self.current_token.clone()),
 			(Token::Symbol(ref a), Token::Symbol(ref b)) if (a == b) => Some(self.current_token.clone()),
 			(_, _) => None,
@@ -795,17 +850,17 @@ impl<'a> Parser<'a> {
 		Ok(token)
 	}
 
-	fn accept_any(&mut self, mtoken: Token) -> Result<Option<SToken>, String> {
+	fn accept_any(&mut self, mtoken: Token) -> Result<Option<SToken>> {
 		// TODO: same as accept()
 		let token = match (self.current_token.tok.clone(), mtoken) {
-			(Token::EOF, Token::EOF) => Some(self.current_token.clone()),
-			(Token::Identifier(_), Token::Identifier(_)) => Some(self.current_token.clone()),
-			(Token::Keyword(_), Token::Keyword(_)) => Some(self.current_token.clone()),
-			(Token::StringLiteral(_), Token::StringLiteral(_))  => Some(self.current_token.clone()),
-			(Token::CharLiteral(_), Token::CharLiteral(_)) => Some(self.current_token.clone()),
-			(Token::IntegerLiteral(_), Token::IntegerLiteral(_))  => Some(self.current_token.clone()),
-			(Token::FloatLiteral(_), Token::FloatLiteral(_)) => Some(self.current_token.clone()),
-			(Token::BoolLiteral(_), Token::BoolLiteral(_)) => Some(self.current_token.clone()),
+			(Token::EOF, Token::EOF) |
+			(Token::Identifier(_), Token::Identifier(_)) |
+			(Token::Keyword(_), Token::Keyword(_)) |
+			(Token::StringLiteral(_), Token::StringLiteral(_)) |
+			(Token::CharLiteral(_), Token::CharLiteral(_)) |
+			(Token::IntegerLiteral(_), Token::IntegerLiteral(_)) |
+			(Token::FloatLiteral(_), Token::FloatLiteral(_)) |
+			(Token::BoolLiteral(_), Token::BoolLiteral(_)) |
 			(Token::Symbol(_), Token::Symbol(_)) => Some(self.current_token.clone()),
 			(_, _) => None,
 		};
@@ -819,28 +874,28 @@ impl<'a> Parser<'a> {
 		Ok(token)
 	}
 
-	fn expect(&mut self, token: Token) -> Result<SToken, String> {
+	fn expect(&mut self, token: Token) -> Result<SToken> {
 		match try!(self.accept(token.clone())) {
 			Some(t) => Ok(t),
-			None => Err(format!("Parser error ({}): expected {:?}, got {:?}", self.current_token.sp, token, self.current_token.tok)),
+			None => Err(Error { kind: ErrorKind::ExpectedGotToken(token, self.current_token.tok.clone()), span: self.current_token.sp.clone() }),
 		}
 	}
 
-	fn expect_any(&mut self, token: Token) -> Result<SToken, String> {
+	fn expect_any(&mut self, token: Token) -> Result<SToken> {
 		match try!(self.accept_any(token.clone())) {
 			Some(t) => Ok(t),
-			None => Err(format!("Parser error ({}): expected {:?}, got {:?}", self.current_token.sp, token, self.current_token.tok)),
+			None => Err(Error { kind: ErrorKind::ExpectedGotToken(token, self.current_token.tok.clone()), span: self.current_token.sp.clone() }),
 		}
 	}
 
-	fn next_token(&mut self) -> Result<SToken, String> {
+	fn next_token(&mut self) -> Result<SToken> {
 		match self.reader.next_token() {
 			Ok(t) => {
 				self.last_sp = self.current_token.sp.clone();
 				self.current_token = t;
 				Ok(self.current_token.clone())
 			},
-			Err(s) => return Err(s)
+			Err(e) => Err(Error { kind: ErrorKind::Lexer(e.clone()), span: e.span }),
 		}
 	}
 }

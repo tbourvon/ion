@@ -103,17 +103,17 @@ pub struct FuncDeclParamData {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-	NoType,
-	ReferenceType(Box<Type>),
-	MutReferenceType(Box<Type>),
-	ArrayType(Box<Type>),
-	MapType(Box<Type>, Box<Type>),
-	StructType(Path),
-	FuncType(Box<Type>, std::vec::Vec<Box<Type>>),
-	StringType,
-	IntType,
-	BoolType,
-	CharType,
+	None,
+	Reference(Box<Type>),
+	MutReference(Box<Type>),
+	Array(Box<Type>),
+	Map(Box<Type>, Box<Type>),
+	Struct(Path),
+	Func(Box<Type>, std::vec::Vec<Box<Type>>),
+	String,
+	Int,
+	Bool,
+	Char,
 }
 
 #[derive(Debug, Clone)]
@@ -150,8 +150,8 @@ pub enum Expression_ {
 	FuncCall(Box<Expression>, std::vec::Vec<Box<Expression>>),
 	Field(Box<Expression>, SpannedString),
 	Index(Box<Expression>, Option<Box<Expression>>),
-	UnOp(UnOp, Box<Expression>),
-	BinOp(BinOp, Box<Expression>, Box<Expression>),
+	UnaryOp(UnaryOp, Box<Expression>),
+	BinaryOp(BinaryOp, Box<Expression>, Box<Expression>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,6 +159,7 @@ pub struct Map {
 	pub map: std::collections::HashMap<Box<Expression>, Box<Expression>>
 }
 
+#[allow(derive_hash_xor_eq)]
 impl Hash for Map {
 	fn hash<H>(&self, state: &mut H) where H: Hasher {
 		for (key, value) in &self.map {
@@ -169,7 +170,7 @@ impl Hash for Map {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum BinOp {
+pub enum BinaryOp {
 	Addition,
 	Substraction,
 	Multiplication,
@@ -181,7 +182,7 @@ pub enum BinOp {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum UnOp {
+pub enum UnaryOp {
 	Reference,
 	MutReference,
 	Dereference,
@@ -190,8 +191,8 @@ pub enum UnOp {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Op {
-	UnOp(UnOp),
-	BinOp(BinOp),
+	Unary(UnaryOp),
+	Binary(BinaryOp),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

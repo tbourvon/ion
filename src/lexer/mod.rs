@@ -1,6 +1,63 @@
 use std;
 use std::fmt;
 use std::fmt::Formatter;
+use std::fmt::Display;
+use std::error::Error as BaseError;
+
+#[derive(Debug, Clone)]
+pub struct Error {
+    pub kind: ErrorKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum ErrorKind {
+    InvalidChar,
+    InvalidString,
+    InvalidInteger,
+    InvalidFloat,
+    InvalidSymbol,
+    UnexpectedChar(char),
+    UnknownEscapeChar(char),
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}: {}", self.span,
+            match self.kind {
+                ErrorKind::InvalidChar |
+                ErrorKind::InvalidString |
+                ErrorKind::InvalidInteger |
+                ErrorKind::InvalidFloat |
+                ErrorKind::InvalidSymbol => self.description().to_string(),
+                ErrorKind::UnexpectedChar(c) => format!("unexpected '{}'", c),
+                ErrorKind::UnknownEscapeChar(c) => format!("unknown escape character {} in string literal", c),
+            }
+        )
+    }
+}
+
+
+
+impl BaseError for Error {
+    fn description(&self) -> &str {
+        match self.kind {
+            ErrorKind::InvalidChar => "failed to parse char",
+            ErrorKind::InvalidString => "failed to parse string",
+            ErrorKind::InvalidInteger => "failed to parse integer",
+            ErrorKind::InvalidFloat => "failed to parse float",
+            ErrorKind::InvalidSymbol => "failed to parse symbol",
+            ErrorKind::UnexpectedChar(_) => "unexpected char",
+            ErrorKind::UnknownEscapeChar(_) => "unknown escape character in string literal",
+        }
+    }
+
+    fn cause(&self) -> Option<&std::error::Error> {
+        None
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Keyword {
@@ -145,7 +202,7 @@ impl<'a> Reader<'a> {
         }
     }
 
-    pub fn next_token(&mut self) -> Result<SToken, String> {
+    pub fn next_token(&mut self) -> Result<SToken> {
         self.skip_whitespace();
 
         self.start_col = self.current_col;
@@ -174,7 +231,7 @@ impl<'a> Reader<'a> {
         })
     }
 
-    fn read_word(&mut self) -> Result<Token, String> {
+    fn read_word(&mut self) -> Result<Token> {
         let mut word = String::new();
 
         while let Some(c) = self.current_char {
@@ -206,7 +263,7 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn read_number(&mut self) -> Result<Token, String> {
+    fn read_number(&mut self) -> Result<Token> {
         let mut float = false;
         let mut number = String::new();
 
@@ -215,7 +272,7 @@ impl<'a> Reader<'a> {
                 number.push(c);
             } else if c == '.' {
                 if float {
-                    return Err(format!("Lexer error ({}): unexpected '.'", self.get_current_span()));
+                    return Err(Error { kind: ErrorKind::UnexpectedChar('.'), span: self.get_current_span() });
                 } else {
                     float = true;
                     number.push(c);
@@ -231,21 +288,21 @@ impl<'a> Reader<'a> {
             if let Some(f) = number.parse::<f64>().ok() {
                 Ok(Token::FloatLiteral(f))
             } else {
-                Err(format!("Lexer error ({}): failed to parse float", self.get_current_span()))
+                Err(Error { kind: ErrorKind::InvalidFloat, span: self.get_current_span() })
             }
         } else {
             if let Some(i) = number.parse::<i64>().ok() {
                 Ok(Token::IntegerLiteral(i))
             } else {
-                Err(format!("Lexer error ({}): failed to parse integer", self.get_current_span()))
+                Err(Error { kind: ErrorKind::InvalidInteger, span: self.get_current_span() })
             }
         }
     }
 
-    fn read_char(&mut self) -> Result<Token, String> {
+    fn read_char(&mut self) -> Result<Token> {
         let mut c = match self.next_char() {
             Some(c) => c,
-            None => return Err(format!("Lexer error ({}): failed to parse char", self.get_current_span())),
+            None => return Err(Error { kind: ErrorKind::InvalidChar, span: self.get_current_span() }),
         };
 
         if c == '\\' { // TODO: make escaping more accurate and complete
@@ -257,14 +314,14 @@ impl<'a> Reader<'a> {
                 self.next_char();
                 Ok(Token::CharLiteral(c))
             } else {
-                Err(format!("Lexer error ({}): failed to parse char", self.get_current_span()))
+                Err(Error { kind: ErrorKind::InvalidChar, span: self.get_current_span() })
             }
         } else {
-            Err(format!("Lexer error ({}): failed to parse char", self.get_current_span()))
+            Err(Error { kind: ErrorKind::InvalidChar, span: self.get_current_span() })
         }
     }
 
-    fn read_string(&mut self) -> Result<Token, String> {
+    fn read_string(&mut self) -> Result<Token> {
         let mut string = String::new();
 
         let mut escaped = false;
@@ -281,7 +338,7 @@ impl<'a> Reader<'a> {
                 if c == 'n' {
                     string.push('\n');
                 } else {
-                    return Err(format!("Lexer error ({}): unknown escape character {} in string literal", self.get_current_span(), c));
+                    return Err(Error { kind: ErrorKind::UnknownEscapeChar(c), span: self.get_current_span() });
                 }
             } else {
                 if c == '\n' {
@@ -296,11 +353,11 @@ impl<'a> Reader<'a> {
         if closed {
             Ok(Token::StringLiteral(string))
         } else {
-            Err(format!("Lexer error ({}): failed to parse string", self.get_current_span()))
+            Err(Error { kind: ErrorKind::InvalidString, span: self.get_current_span() })
         }
     }
 
-    fn read_symbol(&mut self) -> Result<Token, String> {
+    fn read_symbol(&mut self) -> Result<Token> {
         let tok = match self.current_char.unwrap() {
             '(' => Ok(Token::Symbol(Symbol::LeftParenthesis)),
             ')' => Ok(Token::Symbol(Symbol::RightParenthesis)),
@@ -362,7 +419,7 @@ impl<'a> Reader<'a> {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::NotEqual))
                     },
-                    _ => Err(format!("Lexer error ({}): failed to parse symbol", self.get_current_span()))
+                    _ => Err(Error { kind: ErrorKind::InvalidSymbol, span: self.get_current_span() })
                 }
             },
             '#' => Ok(Token::Symbol(Symbol::Hash)),
@@ -388,7 +445,7 @@ impl<'a> Reader<'a> {
                     _ => Ok(Token::Symbol(Symbol::More))
                 }
             },
-            _ => Err(format!("Lexer error ({}): failed to parse symbol", self.get_current_span())),
+            _ => Err(Error { kind: ErrorKind::InvalidSymbol, span: self.get_current_span() }),
         };
 
         self.next_char();

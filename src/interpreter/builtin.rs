@@ -1,4 +1,3 @@
-use std;
 use parser::ast::*;
 use lexer::Span;
 use interpreter::*;
@@ -6,9 +5,9 @@ use std::io;
 use std::io::prelude::*;
 
 impl<'a> Interpreter<'a> {
-	pub fn builtin_print(&'a self, context: *mut InterpreterContext<'a>, args: &std::vec::Vec<Box<Expression>>, span: Span) -> Result<Value, String> {
+	pub fn builtin_print(&'a self, context: *mut InterpreterContext<'a>, args: &[Box<Expression>], span: Span) -> Result<Value> {
 		if args.len() != 1 {
-			return Err(format!("Interpreter error ({}): invalid argument count for println", span))
+			return Err(Error { kind: ErrorKind::InvalidArgCount, span: span })
 		};
 
 		match try!(self.value_from_expression(context, args.get(0).unwrap())) {
@@ -28,9 +27,9 @@ impl<'a> Interpreter<'a> {
 		Ok(Value::Nil)
 	}
 
-	pub fn builtin_readln(&self, args: &std::vec::Vec<Box<Expression>>, span: Span) -> Result<Value, String> {
+	pub fn builtin_readln(&self, args: &[Box<Expression>], span: Span) -> Result<Value> {
 		if args.len() != 0 {
-			return Err(format!("Interpreter error ({}): invalid argument count for readln", span))
+			return Err(Error { kind: ErrorKind::InvalidArgCount, span: span })
 		};
 
 		let mut line = String::new();
@@ -38,7 +37,7 @@ impl<'a> Interpreter<'a> {
 	    stdin.lock().read_line(&mut line).unwrap();
 		let size = line.len();
 		line.remove(size - 1);
-		if line.ends_with("\r") {
+		if line.ends_with('\r') {
 			line.remove(size - 2);
 		}
 

@@ -10,6 +10,142 @@ use std::io::prelude::*;
 use std::borrow::Borrow;
 use std::borrow::BorrowMut;
 use std::hash::*;
+use std::fmt::Display;
+use std::fmt;
+use std::error::Error as BaseError;
+
+#[derive(Debug)]
+pub struct Error<'a> {
+    pub kind: ErrorKind<'a>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub enum ErrorKind<'a> {
+    IO(std::io::Error),
+    Parser(parser::Error),
+	CannotInferTypeEmptyArray,
+	CannotInferTypeEmptyMap,
+	CannotIterateOver(Value<'a>),
+	UnexpectedExprReturn,
+	ExpectedExprReturn,
+	MismatchedTypes(Type, Type),
+	CannotCallNonFunction,
+	ExpectedArgument(String),
+	CannotMutablyRefFunction,
+	UnknownVariable(std::vec::Vec<SpannedString>),
+	IndexOutOfBounds,
+	UnknownIndex(Value<'a>),
+	CannotIndexNonIndexable,
+	CannotPushToUntypedArray,
+	CannotPushToNonArray,
+	UnknownStructField(String),
+	CannotAccessFieldOnNonStruct,
+	CannotDerefConstRefInMutContext,
+	CannotDerefNonRef,
+	CannotGetMutRef(Expression_),
+	CannotGetRef(Expression_),
+	HeterogeneousTypesInArray,
+	HeterogeneousTypesInMap,
+	UnknownStruct(std::vec::Vec<SpannedString>),
+	MissingStructField(String),
+	CannotCountNonCountable,
+	NoDefaultValue(Type),
+    InvalidArgCount,
+}
+
+impl<'a> Display for Error<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let ErrorKind::IO(ref e) = self.kind {
+            e.fmt(f)
+        } else if let ErrorKind::Parser(ref e) = self.kind {
+            e.fmt(f)
+        } else {
+            write!(f, "{}: {}", self.span,
+                match self.kind {
+                    ErrorKind::CannotInferTypeEmptyArray |
+                    ErrorKind::CannotInferTypeEmptyMap |
+                    ErrorKind::UnexpectedExprReturn |
+                    ErrorKind::ExpectedExprReturn |
+                    ErrorKind::CannotCallNonFunction |
+                    ErrorKind::CannotMutablyRefFunction |
+                    ErrorKind::IndexOutOfBounds |
+                    ErrorKind::CannotIndexNonIndexable |
+                    ErrorKind::CannotPushToUntypedArray |
+                    ErrorKind::CannotPushToNonArray |
+                    ErrorKind::CannotAccessFieldOnNonStruct |
+                    ErrorKind::CannotDerefConstRefInMutContext |
+                    ErrorKind::CannotDerefNonRef |
+                    ErrorKind::HeterogeneousTypesInArray |
+                    ErrorKind::HeterogeneousTypesInMap |
+                    ErrorKind::InvalidArgCount |
+                    ErrorKind::CannotCountNonCountable => self.description().to_string(),
+    				ErrorKind::CannotIterateOver(ref v) => format!("cannot iterate over {:?}", v),
+    				ErrorKind::MismatchedTypes(ref e, ref g) => format!("mismatched types (expected {:?}, got {:?})", e, g),
+                    ErrorKind::ExpectedArgument(ref s) => format!("expected argument {}", s),
+                    ErrorKind::UnknownVariable(ref parts) => format!("unknown variable {:?}", parts),
+                    ErrorKind::UnknownIndex(ref v) => format!("unknown index {:?}", v),
+                    ErrorKind::UnknownStructField(ref s) => format!("unknown struct field {}", s),
+                    ErrorKind::CannotGetMutRef(ref e) => format!("cannot get mutable reference for {:?}", e),
+                    ErrorKind::CannotGetRef(ref e) => format!("cannot get reference for {:?}", e),
+                    ErrorKind::UnknownStruct(ref parts) => format!("unknown struct {:?}", parts),
+                    ErrorKind::MissingStructField(ref s) => format!("missing field {} in struct init", s),
+                    ErrorKind::NoDefaultValue(ref t) => format!("no default value for type {:?}", t),
+                    _ => self.description().to_string(),
+                }
+            )
+        }
+    }
+}
+
+impl<'a> BaseError for Error<'a> {
+    fn description(&self) -> &str {
+        match self.kind {
+            ErrorKind::IO(ref e) => e.description(),
+            ErrorKind::Parser(ref e) => e.description(),
+            ErrorKind::CannotInferTypeEmptyArray => "cannot infer type for empty array",
+            ErrorKind::CannotInferTypeEmptyMap => "cannot infer type for empty map",
+            ErrorKind::UnexpectedExprReturn => "unexpected expression for return",
+            ErrorKind::ExpectedExprReturn => "exprected an expression for return",
+            ErrorKind::CannotCallNonFunction => "cannot call a non-function",
+            ErrorKind::CannotMutablyRefFunction => "cannot mutably reference a function",
+            ErrorKind::IndexOutOfBounds => "index out of bounds",
+            ErrorKind::CannotIndexNonIndexable => "cannot index a non-indexable",
+            ErrorKind::CannotPushToUntypedArray => "cannot push to untyped array",
+            ErrorKind::CannotPushToNonArray => "cannot push to non array",
+            ErrorKind::CannotAccessFieldOnNonStruct => "cannot access field on non-struct",
+            ErrorKind::CannotDerefConstRefInMutContext => "cannot dereference const reference in mutable context",
+            ErrorKind::CannotDerefNonRef => "cannot dereference a non-reference",
+            ErrorKind::HeterogeneousTypesInArray => "heterogeneous types in array",
+            ErrorKind::HeterogeneousTypesInMap => "heterogeneous types in map",
+            ErrorKind::CannotCountNonCountable => "cannot count non-countable",
+            ErrorKind::InvalidArgCount => "invalid argument count",
+            ErrorKind::CannotIterateOver(_) => "cannot iterate over value",
+            ErrorKind::MismatchedTypes(_, _) => "mismatched types",
+            ErrorKind::ExpectedArgument(_) => "expected an argument",
+            ErrorKind::UnknownVariable(_) => "unknown variable",
+            ErrorKind::UnknownIndex(_) => "unknown index",
+            ErrorKind::UnknownStructField(_) => "unknown struct field",
+            ErrorKind::CannotGetMutRef(_) => "cannot get mutable reference",
+            ErrorKind::CannotGetRef(_) => "cannot get reference",
+            ErrorKind::UnknownStruct(_) => "unknown struct",
+            ErrorKind::MissingStructField(_) => "missing field in struct init",
+            ErrorKind::NoDefaultValue(_) => "no default value for type",
+        }
+    }
+
+    fn cause(&self) -> Option<&std::error::Error> {
+        None
+    }
+}
+
+impl<'a> From<parser::Error> for Error<'a> {
+    fn from(error: parser::Error) -> Error<'a> {
+        Error { kind: ErrorKind::Parser(error.clone()), span: error.span }
+    }
+}
+
+pub type Result<'a, T> = std::result::Result<T, Error<'a>>;
 
 pub struct Interpreter<'a> {
 	ast: &'a Ast,
@@ -45,16 +181,18 @@ pub enum Value<'a> {
 	Func(Path, FuncDeclData),
 }
 
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct MapValue<'a> {
+pub struct MapValue<'a> {
 	map: std::collections::HashMap<Value<'a>, Value<'a>>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct StructValue<'a> {
+pub struct StructValue<'a> {
 	map: std::collections::HashMap<String, Value<'a>>
 }
 
+#[allow(derive_hash_xor_eq)]
 impl<'a> Hash for MapValue<'a> {
 	fn hash<H>(&self, state: &mut H) where H: Hasher {
 		for (key, value) in &self.map {
@@ -64,6 +202,7 @@ impl<'a> Hash for MapValue<'a> {
 	}
 }
 
+#[allow(derive_hash_xor_eq)]
 impl<'a> Hash for StructValue<'a> {
 	fn hash<H>(&self, state: &mut H) where H: Hasher {
 		for (key, value) in &self.map {
@@ -100,7 +239,7 @@ impl<'a> Interpreter<'a> {
 					FuncDeclData {
 						span: Span::nil_span(),
 						name: name,
-						return_type: Type::NoType,
+						return_type: Type::None,
 						parameters: vec![],
 						statements: vec![],
 					}
@@ -112,7 +251,7 @@ impl<'a> Interpreter<'a> {
 		inject_func("readln".to_string());
 	}
 
-	pub fn execute(&'a mut self) -> Result<(), String> {
+	pub fn execute(&'a mut self) -> Result<()> {
 		self.inject_builtin_funcs();
 
 		let initial_path = Path {
@@ -120,8 +259,15 @@ impl<'a> Interpreter<'a> {
 			parts: vec![],
 		};
 
+        /*
+            We are forced to use unsafe instead of a standard try!() because the borrow checker has a bug:
+            When a loop contains a return, the borrow checker does not recognize it as an early lifetime end, and therefore imposes
+            additional constraints which make the code unwritable safely.
+        */
 		for statement in &self.ast.statements {
-			try!(self.execute_statement(statement, initial_path.clone()));
+            unsafe {
+    			try!((*(self as *mut Self)).execute_statement(statement, initial_path.clone()))
+            }
 		}
 
 		let main_func_call_expr = Expression {
@@ -156,7 +302,7 @@ impl<'a> Interpreter<'a> {
 		Ok(())
 	}
 
-	fn execute_statement(&mut self, statement: &Statement, current_path: Path) -> Result<(), String> {
+	fn execute_statement(&mut self, statement: &Statement, current_path: Path) -> Result<()> {
 		match *statement {
 			Statement::FuncDecl(ref fd) => {
 				let mut new_path = current_path.clone();
@@ -168,7 +314,7 @@ impl<'a> Interpreter<'a> {
 				self.funcs.insert(new_path, Value::Func(current_path.clone(), *fd.clone()));
 			},
 			Statement::Import(ref i) => {
-				if current_path.parts.len() != 0 {
+				if !current_path.parts.is_empty() {
 					let mut import_path = current_path.parts.clone();
 					import_path.pop();
 					try!(self.execute_import(i, Path { span: current_path.span.clone(), parts: import_path }));
@@ -191,55 +337,55 @@ impl<'a> Interpreter<'a> {
 		Ok(())
 	}
 
-	fn type_from_value(value: *const Value, span: Span) -> Result<Type, String> {
+	fn type_from_value(value: *const Value, span: Span) -> Result<Type> {
 		unsafe {
 			match *value {
 				Value::Array(ref t, _) => match *t {
-					Type::NoType => Err(format!("Interpreter error ({}): cannot deduce type for empty array", span)),
-					ref array_type => Ok(Type::ArrayType(
+					Type::None => Err(Error { kind: ErrorKind::CannotInferTypeEmptyArray, span: span}),
+					ref array_type => Ok(Type::Array(
 						Box::new((*array_type).clone())
 					)),
 				},
-				Value::Bool(_) => Ok(Type::BoolType),
-				Value::Char(_) => Ok(Type::CharType),
-				Value::String(_) => Ok(Type::StringType),
-				Value::Integer(_) => Ok(Type::IntType),
-				Value::Struct(ref t, _) => Ok(Type::StructType((*t).clone())),
-				Value::Reference(ref r) => Ok(Type::ReferenceType(Box::new(try!(Self::type_from_value(*r, span))))),
-				Value::MutReference(ref r) => Ok(Type::MutReferenceType(Box::new(try!(Self::type_from_value(*r, span))))),
+				Value::Bool(_) => Ok(Type::Bool),
+				Value::Char(_) => Ok(Type::Char),
+				Value::String(_) => Ok(Type::String),
+				Value::Integer(_) => Ok(Type::Int),
+				Value::Struct(ref t, _) => Ok(Type::Struct((*t).clone())),
+				Value::Reference(ref r) => Ok(Type::Reference(Box::new(try!(Self::type_from_value(*r, span))))),
+				Value::MutReference(ref r) => Ok(Type::MutReference(Box::new(try!(Self::type_from_value(*r, span))))),
 				Value::Func(_, ref fd) => {
 					let mut param_types: std::vec::Vec<Box<Type>> = vec![];
 					for parameter in &fd.parameters {
 						param_types.push(Box::new(parameter.param_type.clone()));
 					}
-					Ok(Type::FuncType(Box::new(fd.return_type.clone()), param_types))
+					Ok(Type::Func(Box::new(fd.return_type.clone()), param_types))
 				},
 				Value::Map(ref t1, ref t2, _) => match ((*t1).clone(), (*t2).clone()) {
-					(Type::NoType, Type::NoType) |
-					(_, Type::NoType) |
-					(Type::NoType, _) => Err(format!("Interpreter error ({}): cannot deduce type for empty map", span)),
-					(map_type1, map_type2) => Ok(Type::MapType(
+					(Type::None, Type::None) |
+					(_, Type::None) |
+					(Type::None, _) => Err(Error { kind: ErrorKind::CannotInferTypeEmptyMap, span: span}),
+					(map_type1, map_type2) => Ok(Type::Map(
 						Box::new(map_type1),
 						Box::new(map_type2)
 					)),
 				},
-				Value::Nil => Ok(Type::NoType),
+				Value::Nil => Ok(Type::None),
 			}
 		}
 	}
 
-	fn execute_import(&mut self, import_data: &ImportData, current_path: Path) -> Result<(), String> { // TODO: rework that for more safety and non-naive handling
+	fn execute_import(&mut self, import_data: &ImportData, current_path: Path) -> Result<()> { // TODO: rework that for more safety and non-naive handling
 		let path_string = current_path.parts.iter().fold("".to_string(), |mut acc, ref item| { acc.push_str(item.ident.as_ref()); acc.push_str("/"); acc }) + import_data.path.as_ref() + ".ion";
 	    let path = std::path::Path::new(AsRef::<str>::as_ref(&path_string[..]));
 	    let mut file = match File::open(&path) {
 	        Ok(file) => file,
-	        Err(err) => return Err(format!("{}", err)),
+	        Err(err) => return Err(Error { kind: ErrorKind::IO(err), span: Span::nil_span()}),
 	    };
 
 	    let mut s = String::new();
 		let res = file.read_to_string(&mut s);
 	    if let Some(err) = res.err() {
-	        return Err(format!("{}", err))
+	        return Err(Error { kind: ErrorKind::IO(err), span: Span::nil_span()})
 	    }
 	    let mut reader = lexer::Reader::new(s.as_ref(), path_string.clone());
 
@@ -247,7 +393,7 @@ impl<'a> Interpreter<'a> {
 	    let ast = try!(parser.parse());
 
 		let mut new_path = current_path.clone();
-		for path_part in import_data.path.split("/") {
+		for path_part in import_data.path.split('/') {
 			new_path.parts.push(SpannedString {
 				span: import_data.span.clone(),
 				ident: path_part.to_string(),
@@ -255,13 +401,15 @@ impl<'a> Interpreter<'a> {
 		}
 
 		for statement in &ast.statements {
-			try!(self.execute_statement(statement, new_path.clone()));
+            unsafe {
+    			try!((*(self as *mut Self)).execute_statement(statement, new_path.clone()))
+            }
 		}
 
 		Ok(())
 	}
 
-	fn execute_block_statement(&'a self, context: *mut InterpreterContext<'a>, block_statement: &'a BlockStatement) -> Result<Value, String> {
+	fn execute_block_statement(&'a self, context: *mut InterpreterContext<'a>, block_statement: &'a BlockStatement) -> Result<Value> {
 		match *block_statement {
 			BlockStatement::Expression(ref e) => { try!(self.value_from_expression(context, e)); Ok(Value::Nil) },
 			BlockStatement::VarDecl(ref vd) => { try!(self.execute_var_decl(context, vd)); Ok(Value::Nil) },
@@ -273,7 +421,7 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn execute_forin(&'a self, context: *mut InterpreterContext<'a>, forin_data: &'a ForInData) -> Result<Value, String> {
+	fn execute_forin(&'a self, context: *mut InterpreterContext<'a>, forin_data: &'a ForInData) -> Result<Value> {
 		let coll_value = try!(self.value_from_expression(context, &forin_data.collection));
 		match coll_value {
 			Value::Array(t, a) => {
@@ -312,7 +460,7 @@ impl<'a> Interpreter<'a> {
 							forin_data.element_name.clone(),
 							Variable {
 								name: forin_data.element_name.clone(),
-								var_type: Type::CharType,
+								var_type: Type::Char,
 								value: Value::Char(c),
 							}
 						);
@@ -334,17 +482,17 @@ impl<'a> Interpreter<'a> {
 					}
 				}
 			},
-			other => return Err(format!("Interpreter error ({}): Cannot iterate over {:?}", forin_data.collection.span, other)),
+			other => return Err(Error { kind: ErrorKind::CannotIterateOver(other), span: forin_data.collection.span.clone()}),
 		};
 
 		Ok(Value::Nil)
 	}
 
-	fn execute_return(&'a self, context: *mut InterpreterContext<'a>, return_data: &ReturnData) -> Result<Value, String> { // TODO: detect ref to local in return expr
+	fn execute_return(&'a self, context: *mut InterpreterContext<'a>, return_data: &ReturnData) -> Result<Value> { // TODO: detect ref to local in return expr
 		match return_data.expected_type {
-			Type::NoType => {
+			Type::None => {
 				if let Some(_) = return_data.value {
-					return Err(format!("Interpreter error ({}): unexpected expression in return statement", return_data.span))
+					return Err(Error { kind: ErrorKind::UnexpectedExprReturn, span: return_data.span.clone()})
 				}
 
 				Ok(Value::Nil)
@@ -356,12 +504,12 @@ impl<'a> Interpreter<'a> {
 						span = e.span.clone();
 						try!(self.value_from_expression(context, e))
 					},
-					None => return Err(format!("Interpreter error ({}): expected expression for return statement", return_data.span)),
+					None => return Err(Error { kind: ErrorKind::ExpectedExprReturn, span: return_data.span.clone()}),
 				};
 
 				let value_type = try!(Self::type_from_value(&value, span.clone()));
 				if value_type != *t {
-					return Err(format!("Interpreter error ({}): mismatched types in return statement (got {:?} expected {:?})", span, value_type, *t))
+					return Err(Error { kind: ErrorKind::MismatchedTypes(value_type, (*t).clone()), span: span})
 				}
 
 				Ok(value)
@@ -369,7 +517,7 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn execute_func_call(&'a self, context: *mut InterpreterContext<'a>, func: &Expression, args: &std::vec::Vec<Box<Expression>>, span: Span) -> Result<Value, String> {
+	fn execute_func_call(&'a self, context: *mut InterpreterContext<'a>, func: &Expression, args: &[Box<Expression>], span: Span) -> Result<Value> {
 		fn is_builtin_func(func: &Expression, name: &str) -> bool {
 			match func.expr {
 				Expression_::Variable(ref p) => {
@@ -383,15 +531,15 @@ impl<'a> Interpreter<'a> {
 			}
 		}
 
-		if is_builtin_func(&func, "print") {
+		if is_builtin_func(func, "print") {
 			self.builtin_print(context, args, span)
-		} else if is_builtin_func(&func, "readln") {
+		} else if is_builtin_func(func, "readln") {
 			self.builtin_readln(args, span)
 		} else {
 			let (path, func_decl) = unsafe {
 				match *try!(self.value_p_from_expression(context, &func)) {
 					Value::Func(ref p, ref fd) => ((*p).clone(), fd),
-					_ => return Err(format!("Interpereter error ({}): cannot call non-function", func.span))
+					_ => return Err(Error { kind: ErrorKind::CannotCallNonFunction, span: func.span.clone()})
 				}
 			};
 
@@ -400,8 +548,11 @@ impl<'a> Interpreter<'a> {
 				current_path: path,
 			};
 
-			let mut param_count = 0;
-			for param in &func_decl.parameters {
+            if args.len() > func_decl.parameters.len() {
+                return Err(Error { kind: ErrorKind::InvalidArgCount, span: func.span.clone() })
+            }
+
+			for (param_count, param) in func_decl.parameters.iter().enumerate() {
 				let variable = Variable {
 					name: param.name.clone(),
 					var_type: param.param_type.clone(),
@@ -412,7 +563,7 @@ impl<'a> Interpreter<'a> {
 							let value_type = try!(Self::type_from_value(&value, args.get(param_count).unwrap().span.clone()));
 
 							if value_type != param.param_type {
-								return Err(format!("Interpreter error ({}): mismatched types in function call (got {:?} expected {:?})", &args.get(param_count).unwrap().span, value_type, param.param_type))
+								return Err(Error { kind: ErrorKind::MismatchedTypes(value_type, param.param_type.clone()), span: args.get(param_count).unwrap().span.clone()})
 							} else {
 								value
 							}
@@ -423,12 +574,12 @@ impl<'a> Interpreter<'a> {
 								let value_type = try!(Self::type_from_value(&value, e.span.clone()));
 
 								if value_type != param.param_type {
-									return Err(format!("Interpreter error ({}): mismatched types in function declaration default value (got {:?} expected {:?})", e.span, value_type, param.param_type))
+									return Err(Error { kind: ErrorKind::MismatchedTypes(value_type, param.param_type.clone()), span: e.span.clone()})
 								} else {
 									value
 								}
 							} else {
-								return Err(format!("Interpreter error ({}): expected argument for {:?}", span, param.name))
+								return Err(Error { kind: ErrorKind::ExpectedArgument(param.name.clone()), span: span})
 							}
 						}
 					}
@@ -438,8 +589,6 @@ impl<'a> Interpreter<'a> {
 					param.name.clone(),
 					variable
 				);
-
-				param_count += 1;
 			}
 
 			let mut return_value: Value = Value::Nil;
@@ -462,7 +611,7 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn execute_var_decl(&'a self, context: *mut InterpreterContext<'a>, var_decl_data: &'a VarDeclData) -> Result<(), String> {
+	fn execute_var_decl(&'a self, context: *mut InterpreterContext<'a>, var_decl_data: &'a VarDeclData) -> Result<()> {
 		let span: Span;
 		let value = match var_decl_data.value {
 			Some(ref v) => {
@@ -485,7 +634,7 @@ impl<'a> Interpreter<'a> {
 						let value_type = try!(Self::type_from_value(&value, span.clone()));
 
 						if value_type != var_decl_data.var_type {
-							return Err(format!("Interpreter error ({}): mismatched types in var initialization (got {:?} expected {:?})", span, value_type, var_decl_data.var_type))
+							return Err(Error { kind: ErrorKind::MismatchedTypes(value_type, var_decl_data.var_type.clone()), span: span})
 						} else {
 							value
 						}
@@ -497,16 +646,16 @@ impl<'a> Interpreter<'a> {
 		Ok(())
 	}
 
-	fn execute_var_assignment(&'a self, context: *mut InterpreterContext<'a>, lhs: &Expression, rhs: &Expression) -> Result<(), String> {
+	fn execute_var_assignment(&'a self, context: *mut InterpreterContext<'a>, lhs: &Expression, rhs: &Expression) -> Result<()> {
 		let lhs_value_ref = try!(self.value_mut_p_from_expression(context, &lhs));
 
 		let rhs_value = try!(self.value_from_expression(context, &rhs));
 
-		let value_type = Self::type_from_value(&rhs_value, rhs.span.clone());
-		let current_type = Self::type_from_value(lhs_value_ref, lhs.span.clone());
+		let value_type = try!(Self::type_from_value(&rhs_value, rhs.span.clone()));
+		let current_type = try!(Self::type_from_value(lhs_value_ref, lhs.span.clone()));
 
 		if value_type != current_type {
-			return Err(format!("Interpreter error ({}): mismatched types in var assignment (got {:?} expected {:?})", rhs.span, value_type, current_type))
+			return Err(Error { kind: ErrorKind::MismatchedTypes(value_type, current_type), span: rhs.span.clone()})
 		} else {
 			unsafe {
 				*lhs_value_ref = rhs_value;
@@ -516,7 +665,7 @@ impl<'a> Interpreter<'a> {
 		Ok(())
 	}
 
-	fn execute_if(&'a self, context: *mut InterpreterContext<'a>, if_data: &'a IfData) -> Result<Value, String> {
+	fn execute_if(&'a self, context: *mut InterpreterContext<'a>, if_data: &'a IfData) -> Result<Value> {
 		match try!(self.value_from_expression(context, &if_data.condition)) {
 			Value::Bool(b) => {
 				if b {
@@ -536,11 +685,11 @@ impl<'a> Interpreter<'a> {
 				}
 				Ok(Value::Nil)
 			},
-			_ => Err(format!("Interpreter error ({}): expected bool expression in if statement", if_data.condition.span))
+			other => Err(Error { kind: ErrorKind::MismatchedTypes(Type::Bool, try!(Self::type_from_value(&other, if_data.condition.span.clone()))), span: if_data.condition.span.clone()})
 		}
 	}
 
-	fn execute_while(&'a self, context: *mut InterpreterContext<'a>, while_data: &'a WhileData) -> Result<Value, String> {
+	fn execute_while(&'a self, context: *mut InterpreterContext<'a>, while_data: &'a WhileData) -> Result<Value> {
 		loop {
 			match try!(self.value_from_expression(context, &while_data.condition)) {
 				Value::Bool(b) => {
@@ -555,12 +704,12 @@ impl<'a> Interpreter<'a> {
 						return Ok(Value::Nil)
 					}
 				},
-				_ => return Err(format!("Interpreter error ({}): expected bool expression in while statement", while_data.condition.span))
+				other => return Err(Error { kind: ErrorKind::MismatchedTypes(Type::Bool, try!(Self::type_from_value(&other, while_data.condition.span.clone()))), span: while_data.condition.span.clone()})
 			}
 		}
 	}
 
-	fn value_mut_p_from_expression(&'a self, context: *mut InterpreterContext<'a>, expression: &Expression) -> Result<*mut Value, String> {
+	fn value_mut_p_from_expression(&'a self, context: *mut InterpreterContext<'a>, expression: &Expression) -> Result<*mut Value> {
 		match expression.expr {
 			Expression_::Variable(ref p) => {
 				if p.parts.len() == 1 {
@@ -571,18 +720,18 @@ impl<'a> Interpreter<'a> {
 
 				unsafe {
 					if p.parts.len() == 1 && self.funcs.get(&Path::concat((*context).current_path.clone(), p.clone())).is_some() {
-						 return Err(format!("Interpreter error ({}): cannot mutably reference function", p.span));
+						 return Err(Error { kind: ErrorKind::CannotMutablyRefFunction, span: p.span.clone()});
 					}
 
 					let mut root_path = (*context).current_path.parts.clone();
 					root_path.pop();
 
 					if self.funcs.get(&Path::concat(Path { span: (*context).current_path.span.clone(), parts: root_path }, p.clone())).is_some() {
-						 return Err(format!("Interpreter error ({}): cannot mutably reference function", p.span));
+						 return Err(Error { kind: ErrorKind::CannotMutablyRefFunction, span: p.span.clone()});
 					};
 				}
 
-				return Err(format!("Interpreter error ({}): unknown variable {:?}", p.span, p.parts));
+				Err(Error { kind: ErrorKind::UnknownVariable(p.parts.clone()), span: p.span.clone()})
 			},
 
 			Expression_::Index(ref indexed, ref index) => {
@@ -599,25 +748,25 @@ impl<'a> Interpreter<'a> {
 										Value::Integer(i) => {
 											match a.get_mut(i as usize) {
 												Some(v) => Ok(v),
-												None => return Err(format!("Interpreter error ({}): index out of bounds", e.span)),
+												None => Err(Error { kind: ErrorKind::IndexOutOfBounds, span: e.span.clone()}),
 											}
 										},
-										_ => return Err(format!("Interpreter error ({}): invalid index type for array", e.span))
+										other => Err(Error { kind: ErrorKind::MismatchedTypes(Type::Int, try!(Self::type_from_value(&other, e.span.clone()))), span: e.span.clone()})
 									}
 								},
 								Value::Map(ref t, _, ref mut m) => {
 									let index_type = try!(Self::type_from_value(&index_value, e.span.clone()));
 
 									if index_type != *t {
-										return Err(format!("Interpreter error ({}): mismatched index type for map", e.span))
+									 	Err(Error { kind: ErrorKind::MismatchedTypes((*t).clone(), index_type), span: e.span.clone()})
 									} else {
 										match m.map.get_mut(&index_value) {
 											Some(v) => Ok(v),
-											None => return Err(format!("Interpreter error ({}): unknown index", e.span)),
+											None => Err(Error { kind: ErrorKind::UnknownIndex(index_value), span: e.span.clone()}),
 										}
 									}
 								},
-								_ => return Err(format!("Interpreter error ({}): can't access index on non-(map/array)", expression.span))
+								_ => Err(Error { kind: ErrorKind::CannotIndexNonIndexable, span: expression.span.clone()})
 							}
 						}
 					},
@@ -630,7 +779,7 @@ impl<'a> Interpreter<'a> {
 								Value::Array(ref t, ref mut a) => {
 									a.push(
 										match *t {
-											Type::NoType => return Err(format!("Interpreter error ({}): cannot push to untyped array", indexed.span)),
+											Type::None => return Err(Error { kind: ErrorKind::CannotPushToUntypedArray, span: indexed.span.clone()}),
 											ref array_type => try!(self.default_value((*array_type).clone(), indexed.span.clone())),
 										}
 									);
@@ -638,7 +787,7 @@ impl<'a> Interpreter<'a> {
 									let last_index = a.len() - 1;
 									Ok(a.get_mut(last_index).unwrap())
 								},
-								_ => return Err(format!("Interpreter error ({}): can't push to non-array", indexed.span))
+								_ => Err(Error { kind: ErrorKind::CannotPushToNonArray, span: indexed.span.clone()})
 							}
 						}
 					},
@@ -652,32 +801,32 @@ impl<'a> Interpreter<'a> {
 						Value::Struct(_, ref mut fields) => {
 							match fields.map.get_mut(&field.ident) {
 								Some(f) => Ok(f.borrow_mut()),
-				                None => return Err(format!("Interpreter error ({}): unknown struct field", field.span)),
+				                None => Err(Error { kind: ErrorKind::UnknownStructField(field.ident.clone()), span: field.span.clone()}),
 							}
 						},
-						_ => return Err(format!("Interpreter error ({}): cannot access field on non-struct", expression.span))
+						_ => Err(Error { kind: ErrorKind::CannotAccessFieldOnNonStruct, span: expression.span.clone()})
 					}
 				}
 			},
 
-			Expression_::UnOp(ref unop, ref e) => {
+			Expression_::UnaryOp(ref unop, ref e) => {
 				match *unop {
-					UnOp::Dereference => {
+					UnaryOp::Dereference => {
 						match try!(self.value_from_expression(context, e)) {
 							Value::MutReference(v) => Ok(v),
-							Value::Reference(_) => return Err(format!("Interpreter error ({}): cannot dereference const reference in mut context", expression.span)),
-							_ => return Err(format!("Interpreter error ({}): cannot dereference non-reference", expression.span))
+							Value::Reference(_) => Err(Error { kind: ErrorKind::CannotDerefConstRefInMutContext, span: expression.span.clone()}),
+							_ => Err(Error { kind: ErrorKind::CannotDerefNonRef, span: expression.span.clone()})
 						}
 					},
-					_ => return Err(format!("Interpreter error ({}): cannot get mutable reference for {:?}", expression.span, expression.expr))
+					_ => Err(Error { kind: ErrorKind::CannotGetMutRef(expression.expr.clone()), span: expression.span.clone()})
 				}
 			},
 
-			_ => return Err(format!("Interpreter error ({}): cannot get mutable reference for {:?}", expression.span, expression.expr))
+			_ => Err(Error { kind: ErrorKind::CannotGetMutRef(expression.expr.clone()), span: expression.span.clone()})
 		}
 	}
 
-	fn value_p_from_expression(&'a self, context: *mut InterpreterContext<'a>, expression: &Expression) -> Result<*const Value, String> {
+	fn value_p_from_expression(&'a self, context: *mut InterpreterContext<'a>, expression: &Expression) -> Result<*const Value> {
 		match expression.expr {
 			Expression_::Variable(ref p) => {
 				if p.parts.len() == 1 {
@@ -701,7 +850,7 @@ impl<'a> Interpreter<'a> {
 					}
 				}
 
-				return Err(format!("Interpreter error ({}): unknown variable {:?}", p.span, p.parts));
+				Err(Error { kind: ErrorKind::UnknownVariable(p.parts.clone()), span: p.span.clone()})
 			},
 			Expression_::Index(ref indexed, ref index) => {
 				match *index {
@@ -717,25 +866,25 @@ impl<'a> Interpreter<'a> {
 										Value::Integer(i) => {
 											match a.get(i as usize) {
 												Some(v) => Ok(v),
-												None => return Err(format!("Interpreter error ({}): index out of bounds", e.span)),
+												None => Err(Error { kind: ErrorKind::IndexOutOfBounds, span: e.span.clone()}),
 											}
 										},
-										_ => return Err(format!("Interpreter error ({}): invalid index type for array", e.span))
+										other => Err(Error { kind: ErrorKind::MismatchedTypes(Type::Int, try!(Self::type_from_value(&other, e.span.clone()))), span: e.span.clone()})
 									}
 								},
 								Value::Map(ref t, _, ref m) => {
 									let index_type = try!(Self::type_from_value(&index_value, e.span.clone()));
 
 									if index_type != *t {
-										return Err(format!("Interpreter error ({}): mismatched index type for map", e.span))
+									 	Err(Error { kind: ErrorKind::MismatchedTypes((*t).clone(), index_type), span: e.span.clone()})
 									} else {
 										match m.map.get(&index_value) {
 											Some(v) => Ok(v),
-											None => return Err(format!("Interpreter error ({}): unknown index", e.span)),
+											None => Err(Error { kind: ErrorKind::UnknownIndex(index_value), span: e.span.clone()}),
 										}
 									}
 								},
-								_ => return Err(format!("Interpreter error ({}): can't access index on non-(map/array)", expression.span))
+								_ => Err(Error { kind: ErrorKind::CannotIndexNonIndexable, span: expression.span.clone()})
 							}
 						}
 					},
@@ -748,7 +897,7 @@ impl<'a> Interpreter<'a> {
 								Value::Array(ref t, ref mut a) => {
 									a.push(
 										match *t {
-											Type::NoType => return Err(format!("Interpreter error ({}): cannot push to untyped array", indexed.span)),
+											Type::None => return Err(Error { kind: ErrorKind::CannotPushToUntypedArray, span: indexed.span.clone()}),
 											ref array_type => try!(self.default_value((*array_type).clone(), indexed.span.clone())),
 										}
 									);
@@ -756,7 +905,7 @@ impl<'a> Interpreter<'a> {
 									let last_index = a.len() - 1;
 									Ok(a.get(last_index).unwrap())
 								},
-								_ => return Err(format!("Interpreter error ({}): can't push to non-array", indexed.span))
+								_ => Err(Error { kind: ErrorKind::CannotPushToNonArray, span: indexed.span.clone()})
 							}
 						}
 					},
@@ -771,32 +920,32 @@ impl<'a> Interpreter<'a> {
 						Value::Struct(_, ref fields) => {
 							match fields.map.get(&field.ident) {
 								Some(f) => Ok(f.borrow()),
-				                None => return Err(format!("Interpreter error ({}): unknown struct field", field.span)),
+				                None => Err(Error { kind: ErrorKind::UnknownStructField(field.ident.clone()), span: field.span.clone()}),
 							}
 						},
-						_ => return Err(format!("Interpreter error ({}): cannot access field on non-struct", expression.span))
+						_ => Err(Error { kind: ErrorKind::CannotAccessFieldOnNonStruct, span: expression.span.clone()})
 					}
 				}
 			},
 
-			Expression_::UnOp(ref unop, ref e) => {
+			Expression_::UnaryOp(ref unop, ref e) => {
 				match *unop {
-					UnOp::Dereference => {
+					UnaryOp::Dereference => {
 						match try!(self.value_from_expression(context, e)) {
 							Value::Reference(v) => Ok(v),
 							Value::MutReference(v) => Ok(v),
-							_ => return Err(format!("Interpreter error ({}): cannot dereference non-reference", expression.span))
+							_ => Err(Error { kind: ErrorKind::CannotDerefNonRef, span: expression.span.clone()})
 						}
 					},
-					_ => return Err(format!("Interpreter error ({}): cannot get reference for {:?}", expression.span, expression.expr))
+					_ => Err(Error { kind: ErrorKind::CannotGetRef(expression.expr.clone()), span: expression.span.clone()})
 				}
 			},
 
-			_ => return Err(format!("Interpreter error ({}): cannot get reference for {:?}", expression.span, expression.expr))
+			_ => Err(Error { kind: ErrorKind::CannotGetRef(expression.expr.clone()), span: expression.span.clone()})
 		}
 	}
 
-	fn value_from_expression(&'a self, context: *mut InterpreterContext<'a>, expression: &Expression) -> Result<Value, String> {
+	fn value_from_expression(&'a self, context: *mut InterpreterContext<'a>, expression: &Expression) -> Result<Value> {
 		match expression.expr {
 			Expression_::StringLiteral(ref sl) => Ok(Value::String(sl.clone())),
 			Expression_::IntegerLiteral(il) => Ok(Value::Integer(il)),
@@ -810,14 +959,14 @@ impl<'a> Interpreter<'a> {
 
 			Expression_::Array(ref a) => {
 				let mut values: std::vec::Vec<Value> = vec![];
-				let mut array_type: Type = Type::NoType;
+				let mut array_type: Type = Type::None;
 				for item in a {
 					let value = try!(self.value_from_expression(context, item));
 					let value_type = try!(Self::type_from_value(&value, item.span.clone()));
 					match array_type {
-						Type::NoType => array_type = value_type,
+						Type::None => array_type = value_type,
 						ref t => if value_type != *t {
-							return Err(format!("Interpreter error ({}): heterogeneous types in array literal", expression.span))
+							return Err(Error { kind: ErrorKind::HeterogeneousTypesInArray, span: expression.span.clone()})
 						},
 					};
 
@@ -831,20 +980,20 @@ impl<'a> Interpreter<'a> {
 				let mut values = MapValue {
 					map: std::collections::HashMap::new(),
 				};
-				let mut map_type1: Type = Type::NoType;
-				let mut map_type2: Type = Type::NoType;
+				let mut map_type1: Type = Type::None;
+				let mut map_type2: Type = Type::None;
 				for (key, value) in &m.map {
 					let key_value = try!(self.value_from_expression(context, key));
 					let key_type = try!(Self::type_from_value(&key_value, key.span.clone()));
 					let value_value = try!(self.value_from_expression(context, value));
 					let value_type = try!(Self::type_from_value(&value_value, value.span.clone()));
 					match (map_type1.clone(), map_type2.clone()) {
-						(Type::NoType, Type::NoType) => {
+						(Type::None, Type::None) => {
 							map_type1 = key_type.clone();
 							map_type2 = value_type.clone();
 						},
 						(ref t1, ref t2) => if key_type != *t1 || value_type != *t2 {
-							return Err(format!("Interpreter error ({}): heterogeneous types in map literal", expression.span))
+							return Err(Error { kind: ErrorKind::HeterogeneousTypesInMap, span: expression.span.clone()})
 						},
 					};
 
@@ -857,7 +1006,7 @@ impl<'a> Interpreter<'a> {
 			Expression_::StructInit(ref p, ref fields) => {
 				let struct_decl = match self.structs.get(p) {
 					Some(s) => s,
-					None => return Err(format!("Interpreter error ({}): unknown struct", p.span))
+					None => return Err(Error { kind: ErrorKind::UnknownStruct(p.parts.clone()), span: p.span.clone()})
 				};
 
 				let mut new_content: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
@@ -872,7 +1021,7 @@ impl<'a> Interpreter<'a> {
 					}
 
 					if !found_field {
-						return Err(format!("Interpreter error ({}): unknown field {:?} in struct init", new_field.span, new_field.name))
+						return Err(Error { kind: ErrorKind::UnknownStructField(new_field.name.ident.clone()), span: new_field.span.clone()})
 					}
 				}
 
@@ -885,7 +1034,7 @@ impl<'a> Interpreter<'a> {
 							let value_type = try!(Self::type_from_value(&value, new_field.span.clone()));
 
 							if field.field_type != value_type {
-								return Err(format!("Interpreter error ({}): mismatched types in struct init (got {:?} expected {:?})", new_field.span, value_type, field.field_type))
+								return Err(Error { kind: ErrorKind::MismatchedTypes(value_type, field.field_type.clone()), span: new_field.span.clone()})
 							} else {
 								new_content.insert(field.name.clone(), value);
 							};
@@ -895,7 +1044,7 @@ impl<'a> Interpreter<'a> {
 					}
 
 					if !found_field {
-						return Err(format!("Interpreter error ({}): missing field {:?} in struct init", expression.span, field.name))
+						return Err(Error { kind: ErrorKind::MissingStructField(field.name.clone()), span: expression.span.clone()})
 					}
 				}
 
@@ -914,10 +1063,10 @@ impl<'a> Interpreter<'a> {
 					Value::Struct(_, ref fields) => {
 						match fields.map.get(&field.ident) {
 							Some(f) => Ok((*f).clone()),
-							None => return Err(format!("Interpreter error ({}): unknown struct field", field.span)),
+							None => Err(Error { kind: ErrorKind::UnknownStructField(field.ident.clone()), span: field.span.clone()}),
 						}
 					},
-					_ => return Err(format!("Interpreter error ({}): cannot access field on non-struct", expression.span))
+					_ => Err(Error { kind: ErrorKind::CannotAccessFieldOnNonStruct, span: expression.span.clone()})
 				}
 			},
 
@@ -935,25 +1084,25 @@ impl<'a> Interpreter<'a> {
 										Value::Integer(i) => {
 											match a.get(i as usize) {
 												Some(v) => Ok((*v).clone()),
-												None => return Err(format!("Interpreter error ({}): index out of bounds", e.span)),
+												None => Err(Error { kind: ErrorKind::IndexOutOfBounds, span: e.span.clone()}),
 											}
 										},
-										_ => return Err(format!("Interpreter error ({}): invalid index type for array", e.span))
+										other => Err(Error { kind: ErrorKind::MismatchedTypes(Type::Int, try!(Self::type_from_value(&other, e.span.clone()))), span: e.span.clone()})
 									}
 								},
 								Value::Map(ref t, _, ref m) => {
 									let index_type = try!(Self::type_from_value(&index_value, e.span.clone()));
 
 									if index_type != *t {
-										return Err(format!("Interpreter error ({}): mismatched index type for map", e.span))
+										Err(Error { kind: ErrorKind::MismatchedTypes((*t).clone(), index_type), span: e.span.clone()})
 									} else {
 										match m.map.get(&index_value) {
 											Some(v) => Ok((*v).clone()),
-											None => return Err(format!("Interpreter error ({}): unknown index", e.span)),
+											None => Err(Error { kind: ErrorKind::UnknownIndex(index_value), span: e.span.clone()}),
 										}
 									}
 								},
-								_ => return Err(format!("Interpreter error ({}): can't access index on non-(map/array)", expression.span))
+								_ => Err(Error { kind: ErrorKind::CannotIndexNonIndexable, span: expression.span.clone()})
 							}
 						}
 					},
@@ -966,7 +1115,7 @@ impl<'a> Interpreter<'a> {
 								Value::Array(ref t, ref mut a) => {
 									a.push(
 										match *t {
-											Type::NoType => return Err(format!("Interpreter error ({}): cannot push to untyped array", indexed.span)),
+											Type::None => return Err(Error { kind: ErrorKind::CannotPushToUntypedArray, span: indexed.span.clone()}),
 											ref array_type => try!(self.default_value((*array_type).clone(), indexed.span.clone())),
 										}
 									);
@@ -974,115 +1123,115 @@ impl<'a> Interpreter<'a> {
 									let last_index = a.len() - 1;
 									Ok(a.get(last_index).unwrap().clone())
 								},
-								_ => return Err(format!("Interpreter error ({}): can't push to non-array", indexed.span))
+								_ => Err(Error { kind: ErrorKind::CannotPushToNonArray, span: indexed.span.clone()})
 							}
 						}
 					},
 				}
 			},
 
-			Expression_::UnOp(ref unop, ref e) => {
+			Expression_::UnaryOp(ref unop, ref e) => {
 				match *unop {
-					UnOp::Reference => {
+					UnaryOp::Reference => {
 						Ok(Value::Reference(try!(self.value_p_from_expression(context, e))))
 					},
-					UnOp::MutReference => {
+					UnaryOp::MutReference => {
 						Ok(Value::MutReference(try!(self.value_mut_p_from_expression(context, e))))
 					},
-					UnOp::Count => {
+					UnaryOp::Count => {
 						match try!(self.value_from_expression(context, e)) {
 							Value::Array(_, ref a) => Ok(Value::Integer(a.len() as i64)),
 							Value::String(ref s) => Ok(Value::Integer(s.len() as i64)),
-							_ => return Err(format!("Interpreter error ({}): can't get count on non-(array/string)", expression.span))
+							_ => Err(Error { kind: ErrorKind::CannotCountNonCountable, span: expression.span.clone()})
 						}
 					},
-					UnOp::Dereference => {
+					UnaryOp::Dereference => {
 						match try!(self.value_from_expression(context, e)) {
 							Value::Reference(v) => unsafe { Ok((*v).clone()) },
 							Value::MutReference(v) => unsafe { Ok((*v).clone()) },
-							_ => return Err(format!("Interpreter error ({}): cannot dereference non-reference", expression.span))
+							_ => Err(Error { kind: ErrorKind::CannotDerefNonRef, span: expression.span.clone()})
 						}
 					}
 				}
 			},
 
-			Expression_::BinOp(ref binop, ref e1, ref e2) => {
+			Expression_::BinaryOp(ref binop, ref e1, ref e2) => {
 				match *binop {
-					BinOp::Addition => {
+					BinaryOp::Addition => {
 						let integer1 = match try!(self.value_from_expression(context, e1)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error ({}): incorrect expression for addition: {:?}", e1.span, other))
+							other => return Err(Error { kind: ErrorKind::MismatchedTypes(Type::Int, try!(Self::type_from_value(&other, e1.span.clone()))), span: e1.span.clone()})
 						};
 
 						let integer2 = match try!(self.value_from_expression(context, e2)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error ({}): incorrect expression for addition: {:?}", e2.span, other))
+							other => return Err(Error { kind: ErrorKind::MismatchedTypes(Type::Int, try!(Self::type_from_value(&other, e2.span.clone()))), span: e2.span.clone()})
 						};
 
 						Ok(Value::Integer(integer1 + integer2))
 					},
-					BinOp::Substraction => {
-						let integer1 = match try!(self.value_from_expression(context, e1)) {
+					BinaryOp::Substraction => {
+                        let integer1 = match try!(self.value_from_expression(context, e1)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error ({}): incorrect expression for substraction: {:?}", e1.span, other))
+							other => return Err(Error { kind: ErrorKind::MismatchedTypes(Type::Int, try!(Self::type_from_value(&other, e1.span.clone()))), span: e1.span.clone()})
 						};
 
 						let integer2 = match try!(self.value_from_expression(context, e2)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error ({}): incorrect expression for substraction: {:?}", e2.span, other))
+							other => return Err(Error { kind: ErrorKind::MismatchedTypes(Type::Int, try!(Self::type_from_value(&other, e2.span.clone()))), span: e2.span.clone()})
 						};
 
 						Ok(Value::Integer(integer1 - integer2))
 					},
-					BinOp::Multiplication => {
-						let integer1 = match try!(self.value_from_expression(context, e1)) {
+					BinaryOp::Multiplication => {
+                        let integer1 = match try!(self.value_from_expression(context, e1)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error ({}): incorrect expression for multiplication: {:?}", e1.span, other))
+							other => return Err(Error { kind: ErrorKind::MismatchedTypes(Type::Int, try!(Self::type_from_value(&other, e1.span.clone()))), span: e1.span.clone()})
 						};
 
 						let integer2 = match try!(self.value_from_expression(context, e2)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error ({}): incorrect expression for multiplication: {:?}", e2.span, other))
+							other => return Err(Error { kind: ErrorKind::MismatchedTypes(Type::Int, try!(Self::type_from_value(&other, e2.span.clone()))), span: e2.span.clone()})
 						};
 
 						Ok(Value::Integer(integer1 * integer2))
 					},
-					BinOp::Division => {
-						let integer1 = match try!(self.value_from_expression(context, e1)) {
+					BinaryOp::Division => {
+                        let integer1 = match try!(self.value_from_expression(context, e1)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error ({}): incorrect expression for division: {:?}", e1.span, other))
+							other => return Err(Error { kind: ErrorKind::MismatchedTypes(Type::Int, try!(Self::type_from_value(&other, e1.span.clone()))), span: e1.span.clone()})
 						};
 
 						let integer2 = match try!(self.value_from_expression(context, e2)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error ({}): incorrect expression for division: {:?}", e2.span, other))
+							other => return Err(Error { kind: ErrorKind::MismatchedTypes(Type::Int, try!(Self::type_from_value(&other, e2.span.clone()))), span: e2.span.clone()})
 						};
 
 						Ok(Value::Integer(integer1 / integer2))
 					},
-					BinOp::Modulo => {
-						let integer1 = match try!(self.value_from_expression(context, e1)) {
+					BinaryOp::Modulo => {
+                        let integer1 = match try!(self.value_from_expression(context, e1)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error ({}): incorrect expression for modulo: {:?}", e1.span, other))
+							other => return Err(Error { kind: ErrorKind::MismatchedTypes(Type::Int, try!(Self::type_from_value(&other, e1.span.clone()))), span: e1.span.clone()})
 						};
 
 						let integer2 = match try!(self.value_from_expression(context, e2)) {
 							Value::Integer(i) => i,
-							other => return Err(format!("Interpreter error ({}): incorrect expression for modulo: {:?}", e2.span, other))
+							other => return Err(Error { kind: ErrorKind::MismatchedTypes(Type::Int, try!(Self::type_from_value(&other, e2.span.clone()))), span: e2.span.clone()})
 						};
 
 						Ok(Value::Integer(integer1 % integer2))
 					},
 
-					BinOp::Concatenation => {
+					BinaryOp::Concatenation => {
 						let string1 = match try!(self.value_from_expression(context, e1)) {
 							Value::String(s) => s,
-							other => return Err(format!("Interpreter error ({}): incorrect expression for concatenation: {:?}", e1.span, other))
+							other => return Err(Error { kind: ErrorKind::MismatchedTypes(Type::String, try!(Self::type_from_value(&other, e1.span.clone()))), span: e1.span.clone()})
 						};
 
 						let string2 = match try!(self.value_from_expression(context, e2)) {
 							Value::String(s) => s,
-							other => return Err(format!("Interpreter error ({}): incorrect expression for concatenation: {:?}", e2.span, other))
+							other => return Err(Error { kind: ErrorKind::MismatchedTypes(Type::String, try!(Self::type_from_value(&other, e2.span.clone()))), span: e2.span.clone()})
 						};
 
 						let mut new_string = String::new();
@@ -1091,15 +1240,15 @@ impl<'a> Interpreter<'a> {
 						Ok(Value::String(new_string))
 					}
 
-					BinOp::Equality => {
-						let value1 = self.value_from_expression(context, e1);
-						let value2 = self.value_from_expression(context, e2);
+					BinaryOp::Equality => {
+						let value1 = try!(self.value_from_expression(context, e1));
+						let value2 = try!(self.value_from_expression(context, e2));
 
 						Ok(Value::Bool(value1 == value2))
 					},
-					BinOp::Inequality => {
-						let value1 = self.value_from_expression(context, e1);
-						let value2 = self.value_from_expression(context, e2);
+					BinaryOp::Inequality => {
+						let value1 = try!(self.value_from_expression(context, e1));
+						let value2 = try!(self.value_from_expression(context, e2));
 
 						Ok(Value::Bool(value1 != value2))
 					},
@@ -1110,18 +1259,18 @@ impl<'a> Interpreter<'a> {
 
 
 
-	fn default_value(&self, var_type: Type, span: Span) -> Result<Value, String> {
+	fn default_value(&self, var_type: Type, span: Span) -> Result<Value> {
 		match var_type {
-			Type::StringType => Ok(Value::String("".to_string())),
-			Type::IntType => Ok(Value::Integer(0)),
-			Type::BoolType => Ok(Value::Bool(false)),
-			Type::CharType => Ok(Value::Char('\0')),
-			Type::ArrayType(t) => Ok(Value::Array(*t, vec![])),
-			Type::MapType(t1, t2) => Ok(Value::Map(*t1, *t2, MapValue { map: std::collections::HashMap::new() })),
-			Type::StructType(ref p) => {
+			Type::String => Ok(Value::String("".to_string())),
+			Type::Int => Ok(Value::Integer(0)),
+			Type::Bool => Ok(Value::Bool(false)),
+			Type::Char => Ok(Value::Char('\0')),
+			Type::Array(t) => Ok(Value::Array(*t, vec![])),
+			Type::Map(t1, t2) => Ok(Value::Map(*t1, *t2, MapValue { map: std::collections::HashMap::new() })),
+			Type::Struct(ref p) => {
 				let struct_decl = match self.structs.get(p) {
 					Some(s) => s,
-					None => return Err(format!("Interpreter error ({}): unknown struct", span))
+					None => return Err(Error { kind: ErrorKind::UnknownStruct(p.parts.clone()), span: span})
 				};
 
 				let mut fields: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
@@ -1132,10 +1281,7 @@ impl<'a> Interpreter<'a> {
 
 				Ok(Value::Struct(p.clone(), StructValue { map: fields }))
 			},
-			Type::ReferenceType(_) => Err(format!("Interpreter error ({}): no default value for references", span)),
-			Type::MutReferenceType(_) => Err(format!("Interpreter error ({}): no default value for mut references", span)),
-			Type::FuncType(..) => Err(format!("Interpreter error ({}): no default value for functions", span)),
-			Type::NoType => Err(format!("Interpreter error ({}): no default value for nil type", span))
+			other => Err(Error { kind: ErrorKind::NoDefaultValue(other), span: span}),
 		}
 	}
 }
