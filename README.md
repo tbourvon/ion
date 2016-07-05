@@ -1,4 +1,4 @@
-# ion
+# ion [![Build Status](https://travis-ci.org/BurningMind/ion.svg?branch=dev)](https://travis-ci.org/BurningMind/ion)
 
 ion is a multi-purpose, statically-typed programming language with a focus on productivity.
 
