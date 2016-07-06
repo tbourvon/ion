@@ -567,20 +567,18 @@ impl<'a> Interpreter<'a> {
 							} else {
 								value
 							}
-						} else {
-							if let Some(ref e) = param.default_value {
-								let value = try!(self.value_from_expression(context, e));
+						} else if let Some(ref e) = param.default_value {
+							let value = try!(self.value_from_expression(context, e));
 
-								let value_type = try!(Self::type_from_value(&value, e.span.clone()));
+							let value_type = try!(Self::type_from_value(&value, e.span.clone()));
 
-								if value_type != param.param_type {
-									return Err(Error { kind: ErrorKind::MismatchedTypes(value_type, param.param_type.clone()), span: e.span.clone()})
-								} else {
-									value
-								}
+							if value_type != param.param_type {
+								return Err(Error { kind: ErrorKind::MismatchedTypes(value_type, param.param_type.clone()), span: e.span.clone()})
 							} else {
-								return Err(Error { kind: ErrorKind::ExpectedArgument(param.name.clone()), span: span})
+								value
 							}
+						} else {
+							return Err(Error { kind: ErrorKind::ExpectedArgument(param.name.clone()), span: span})
 						}
 					}
 				};
@@ -976,7 +974,7 @@ impl<'a> Interpreter<'a> {
 				Ok(Value::Array(array_type, values))
 			},
 
-			Expression_::Map(ref m) => {
+			Expression_::Map(ref m) => { 
 				let mut values = MapValue {
 					map: std::collections::HashMap::new(),
 				};

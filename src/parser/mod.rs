@@ -735,22 +735,18 @@ impl<'a> Parser<'a> {
 
 		if self.just_skept_newline {
 			Ok(new_expr)
-		} else {
-			if let Some(binop) = Self::binop_for_token(self.current_token.clone()) {
-				if Self::precedence_for_op(Op::Binary(binop.clone())) > minimum_precedence {
-					self.parse_expression_(Some(new_expr), Self::precedence_for_op(Op::Binary(binop)))
-				} else {
-					Ok(new_expr)
-				}
+		} else if let Some(binop) = Self::binop_for_token(self.current_token.clone()) {
+			if Self::precedence_for_op(Op::Binary(binop.clone())) > minimum_precedence {
+				self.parse_expression_(Some(new_expr), Self::precedence_for_op(Op::Binary(binop)))
 			} else {
-				if self.current_token.tok == Token::Symbol(Symbol::LeftParenthesis) ||
-				   self.current_token.tok == Token::Symbol(Symbol::LeftBracket) ||
-				   self.current_token.tok == Token::Symbol(Symbol::Dot) { // TODO: find a prettier solution
-					self.parse_expression_(Some(new_expr), 0)
-				} else {
-					Ok(new_expr)
-				}
+				Ok(new_expr)
 			}
+		} else if self.current_token.tok == Token::Symbol(Symbol::LeftParenthesis) ||
+		   self.current_token.tok == Token::Symbol(Symbol::LeftBracket) ||
+		   self.current_token.tok == Token::Symbol(Symbol::Dot) { // TODO: find a prettier solution
+			self.parse_expression_(Some(new_expr), 0)
+		} else {
+			Ok(new_expr)
 		}
 	}
 

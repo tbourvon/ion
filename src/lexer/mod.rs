@@ -4,13 +4,16 @@ use std::fmt::Formatter;
 use std::fmt::Display;
 use std::error::Error as BaseError;
 
-#[derive(Debug, Clone)]
+#[cfg(test)]
+mod tests;
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Error {
     pub kind: ErrorKind,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ErrorKind {
     InvalidChar,
     InvalidString,
@@ -290,12 +293,10 @@ impl<'a> Reader<'a> {
             } else {
                 Err(Error { kind: ErrorKind::InvalidFloat, span: self.get_current_span() })
             }
+        } else if let Some(i) = number.parse::<i64>().ok() {
+            Ok(Token::IntegerLiteral(i))
         } else {
-            if let Some(i) = number.parse::<i64>().ok() {
-                Ok(Token::IntegerLiteral(i))
-            } else {
-                Err(Error { kind: ErrorKind::InvalidInteger, span: self.get_current_span() })
-            }
+            Err(Error { kind: ErrorKind::InvalidInteger, span: self.get_current_span() })
         }
     }
 
@@ -375,7 +376,7 @@ impl<'a> Reader<'a> {
             '.' => Ok(Token::Symbol(Symbol::Dot)),
             ',' => Ok(Token::Symbol(Symbol::Comma)),
             ':' => {
-                match self.peek_char().unwrap() {
+                match self.peek_char().unwrap_or('\0') {
                     ':' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::ColonColon))
@@ -384,7 +385,7 @@ impl<'a> Reader<'a> {
                 }
             },
             '=' => {
-                match self.peek_char().unwrap() {
+                match self.peek_char().unwrap_or('\0') {
                     '=' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::EqualEqual))
@@ -393,7 +394,7 @@ impl<'a> Reader<'a> {
                 }
             },
             '+' => {
-                match self.peek_char().unwrap() {
+                match self.peek_char().unwrap_or('\0') {
                     '+' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::PlusPlus))
@@ -402,7 +403,7 @@ impl<'a> Reader<'a> {
                 }
             },
             '-' => {
-                match self.peek_char().unwrap() {
+                match self.peek_char().unwrap_or('\0') {
                     '>' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::Return))
@@ -414,7 +415,7 @@ impl<'a> Reader<'a> {
             '/' => Ok(Token::Symbol(Symbol::Over)),
             '%' => Ok(Token::Symbol(Symbol::Modulo)),
             '!' => {
-                match self.peek_char().unwrap() {
+                match self.peek_char().unwrap_or('\0') {
                     '=' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::NotEqual))
@@ -424,7 +425,7 @@ impl<'a> Reader<'a> {
             },
             '#' => Ok(Token::Symbol(Symbol::Hash)),
             '<' => {
-                match self.peek_char().unwrap() {
+                match self.peek_char().unwrap_or('\0') {
                     '=' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::LessOrEqual))
@@ -437,7 +438,7 @@ impl<'a> Reader<'a> {
                 }
             },
             '>' => {
-                match self.peek_char().unwrap() {
+                match self.peek_char().unwrap_or('\0') {
                     '=' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::MoreOrEqual))
