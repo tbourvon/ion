@@ -34,9 +34,13 @@ fn test_token_eof() {
 
 #[test]
 fn test_token_identifier() {
-    nth_token_eq("test_identifier00", 0, Token::Identifier("test_identifier00".to_string()));
+    nth_token_eq("test_identifier00",
+                 0,
+                 Token::Identifier("test_identifier00".to_string()));
 
-    nth_token_neq("00invalid_identifier", 0, Token::Identifier("00invalid_identifier".to_string()));
+    nth_token_neq("00invalid_identifier",
+                  0,
+                  Token::Identifier("00invalid_identifier".to_string()));
 }
 
 #[test]
@@ -57,7 +61,9 @@ fn test_token_keyword() {
 
 #[test]
 fn test_token_string_literal() {
-    nth_token_eq("\"test string\"", 0, Token::StringLiteral("test string".to_string()));
+    nth_token_eq("\"test string\"",
+                 0,
+                 Token::StringLiteral("test string".to_string()));
     nth_token_eq("\"\\n\"", 0, Token::StringLiteral("\n".to_string()));
     nth_token_eq("\"\n\"", 0, Token::StringLiteral("\n".to_string()));
 

@@ -26,17 +26,20 @@ pub enum ErrorKind {
 
 impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}: {}", self.span,
-            match self.kind {
-                ErrorKind::InvalidChar |
-                ErrorKind::InvalidString |
-                ErrorKind::InvalidInteger |
-                ErrorKind::InvalidFloat |
-                ErrorKind::InvalidSymbol => self.description().to_string(),
-                ErrorKind::UnexpectedChar(c) => format!("unexpected '{}'", c),
-                ErrorKind::UnknownEscapeChar(c) => format!("unknown escape character {} in string literal", c),
-            }
-        )
+        write!(f,
+               "{}: {}",
+               self.span,
+               match self.kind {
+                   ErrorKind::InvalidChar |
+                   ErrorKind::InvalidString |
+                   ErrorKind::InvalidInteger |
+                   ErrorKind::InvalidFloat |
+                   ErrorKind::InvalidSymbol => self.description().to_string(),
+                   ErrorKind::UnexpectedChar(c) => format!("unexpected '{}'", c),
+                   ErrorKind::UnknownEscapeChar(c) => {
+                       format!("unknown escape character {} in string literal", c)
+                   }
+               })
     }
 }
 
@@ -224,7 +227,7 @@ impl<'a> Reader<'a> {
                 } else {
                     self.read_symbol()
                 }
-            },
+            }
             None => Ok(Token::EOF),
         };
 
@@ -245,7 +248,7 @@ impl<'a> Reader<'a> {
             }
 
             self.next_char();
-        };
+        }
 
         match word.as_ref() {
             "import" => Ok(Token::Keyword(Keyword::Import)),
@@ -275,7 +278,10 @@ impl<'a> Reader<'a> {
                 number.push(c);
             } else if c == '.' {
                 if float {
-                    return Err(Error { kind: ErrorKind::UnexpectedChar('.'), span: self.get_current_span() });
+                    return Err(Error {
+                        kind: ErrorKind::UnexpectedChar('.'),
+                        span: self.get_current_span(),
+                    });
                 } else {
                     float = true;
                     number.push(c);
@@ -285,28 +291,40 @@ impl<'a> Reader<'a> {
             }
 
             self.next_char();
-        };
+        }
 
         if float {
             if let Some(f) = number.parse::<f64>().ok() {
                 Ok(Token::FloatLiteral(f))
             } else {
-                Err(Error { kind: ErrorKind::InvalidFloat, span: self.get_current_span() })
+                Err(Error {
+                    kind: ErrorKind::InvalidFloat,
+                    span: self.get_current_span(),
+                })
             }
         } else if let Some(i) = number.parse::<i64>().ok() {
             Ok(Token::IntegerLiteral(i))
         } else {
-            Err(Error { kind: ErrorKind::InvalidInteger, span: self.get_current_span() })
+            Err(Error {
+                kind: ErrorKind::InvalidInteger,
+                span: self.get_current_span(),
+            })
         }
     }
 
     fn read_char(&mut self) -> Result<Token> {
         let mut c = match self.next_char() {
             Some(c) => c,
-            None => return Err(Error { kind: ErrorKind::InvalidChar, span: self.get_current_span() }),
+            None => {
+                return Err(Error {
+                    kind: ErrorKind::InvalidChar,
+                    span: self.get_current_span(),
+                })
+            }
         };
 
-        if c == '\\' { // TODO: make escaping more accurate and complete
+        if c == '\\' {
+            // TODO: make escaping more accurate and complete
             c = self.next_char().unwrap();
         };
 
@@ -315,10 +333,16 @@ impl<'a> Reader<'a> {
                 self.next_char();
                 Ok(Token::CharLiteral(c))
             } else {
-                Err(Error { kind: ErrorKind::InvalidChar, span: self.get_current_span() })
+                Err(Error {
+                    kind: ErrorKind::InvalidChar,
+                    span: self.get_current_span(),
+                })
             }
         } else {
-            Err(Error { kind: ErrorKind::InvalidChar, span: self.get_current_span() })
+            Err(Error {
+                kind: ErrorKind::InvalidChar,
+                span: self.get_current_span(),
+            })
         }
     }
 
@@ -339,7 +363,10 @@ impl<'a> Reader<'a> {
                 if c == 'n' {
                     string.push('\n');
                 } else {
-                    return Err(Error { kind: ErrorKind::UnknownEscapeChar(c), span: self.get_current_span() });
+                    return Err(Error {
+                        kind: ErrorKind::UnknownEscapeChar(c),
+                        span: self.get_current_span(),
+                    });
                 }
             } else {
                 if c == '\n' {
@@ -349,12 +376,15 @@ impl<'a> Reader<'a> {
                 escaped = false;
                 string.push(c);
             }
-        };
+        }
 
         if closed {
             Ok(Token::StringLiteral(string))
         } else {
-            Err(Error { kind: ErrorKind::InvalidString, span: self.get_current_span() })
+            Err(Error {
+                kind: ErrorKind::InvalidString,
+                span: self.get_current_span(),
+            })
         }
     }
 
@@ -372,7 +402,7 @@ impl<'a> Reader<'a> {
                 self.current_col = 0;
                 self.current_row += 1;
                 Ok(Token::Symbol(Symbol::NewLine))
-            },
+            }
             '.' => Ok(Token::Symbol(Symbol::Dot)),
             ',' => Ok(Token::Symbol(Symbol::Comma)),
             ':' => {
@@ -380,37 +410,37 @@ impl<'a> Reader<'a> {
                     ':' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::ColonColon))
-                    },
+                    }
                     _ => Ok(Token::Symbol(Symbol::Colon)),
                 }
-            },
+            }
             '=' => {
                 match self.peek_char().unwrap_or('\0') {
                     '=' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::EqualEqual))
-                    },
+                    }
                     _ => Ok(Token::Symbol(Symbol::Equal)),
                 }
-            },
+            }
             '+' => {
                 match self.peek_char().unwrap_or('\0') {
                     '+' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::PlusPlus))
-                    },
+                    }
                     _ => Ok(Token::Symbol(Symbol::Plus)),
                 }
-            },
+            }
             '-' => {
                 match self.peek_char().unwrap_or('\0') {
                     '>' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::Return))
-                    },
+                    }
                     _ => Ok(Token::Symbol(Symbol::Minus)),
                 }
-            },
+            }
             '*' => Ok(Token::Symbol(Symbol::Star)),
             '/' => Ok(Token::Symbol(Symbol::Over)),
             '%' => Ok(Token::Symbol(Symbol::Modulo)),
@@ -419,34 +449,44 @@ impl<'a> Reader<'a> {
                     '=' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::NotEqual))
-                    },
-                    _ => Err(Error { kind: ErrorKind::InvalidSymbol, span: self.get_current_span() })
+                    }
+                    _ => {
+                        Err(Error {
+                            kind: ErrorKind::InvalidSymbol,
+                            span: self.get_current_span(),
+                        })
+                    }
                 }
-            },
+            }
             '#' => Ok(Token::Symbol(Symbol::Hash)),
             '<' => {
                 match self.peek_char().unwrap_or('\0') {
                     '=' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::LessOrEqual))
-                    },
+                    }
                     '>' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::Concat))
                     }
                     _ => Ok(Token::Symbol(Symbol::Less)),
                 }
-            },
+            }
             '>' => {
                 match self.peek_char().unwrap_or('\0') {
                     '=' => {
                         self.next_char();
                         Ok(Token::Symbol(Symbol::MoreOrEqual))
-                    },
-                    _ => Ok(Token::Symbol(Symbol::More))
+                    }
+                    _ => Ok(Token::Symbol(Symbol::More)),
                 }
-            },
-            _ => Err(Error { kind: ErrorKind::InvalidSymbol, span: self.get_current_span() }),
+            }
+            _ => {
+                Err(Error {
+                    kind: ErrorKind::InvalidSymbol,
+                    span: self.get_current_span(),
+                })
+            }
         };
 
         self.next_char();

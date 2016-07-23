@@ -15,8 +15,8 @@ Usage: ion <src>
 
 fn main() {
     let args = docopt::Docopt::new(USAGE)
-                              .and_then(|d| d.parse())
-                              .unwrap_or_else(|e| e.exit());
+        .and_then(|d| d.parse())
+        .unwrap_or_else(|e| e.exit());
 
     let path = Path::new(args.get_str("<src>"));
     let mut file = match File::open(&path) {
