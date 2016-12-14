@@ -27,7 +27,7 @@ impl<'a> Interpreter<'a> {
             Value::Map(_, _, m) => print!("{:?}", m),
             Value::Reference(v) => print!("ref {:?}", v),
             Value::MutReference(v) => print!("mutref {:?}", v),
-            Value::Func(_, f) => print!("{:?}", f),
+            Value::Func(f) => print!("{:?}", f),
             Value::Nil => print!("nil"),
         };
 

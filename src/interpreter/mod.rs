@@ -2,11 +2,8 @@ pub mod builtin;
 
 use parser::ast::*;
 use std;
-use lexer;
 use lexer::Span;
 use parser;
-use std::fs::File;
-use std::io::prelude::*;
 use std::borrow::Borrow;
 use std::borrow::BorrowMut;
 use std::hash::*;
@@ -20,9 +17,21 @@ pub struct Error<'a> {
     pub span: Span,
 }
 
+impl Path {
+    fn resolved<'a>(self) -> Result<'a, ResolvedPath> {
+        match self {
+            Path::Resolved(rp) => Ok(rp),
+            Path::Unresolved(up) => Err(Error {
+                span: up.span.clone(),
+                kind: ErrorKind::_UnresolvedPath(up),
+            }),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ErrorKind<'a> {
-    IO(std::io::Error),
+    _UnresolvedPath(UnresolvedPath),
     Parser(parser::Error),
     CannotInferTypeEmptyArray,
     CannotInferTypeEmptyMap,
@@ -33,7 +42,7 @@ pub enum ErrorKind<'a> {
     CannotCallNonFunction,
     ExpectedArgument(String),
     CannotMutablyRefFunction,
-    UnknownVariable(std::vec::Vec<SpannedString>),
+    UnknownVariable(std::vec::Vec<String>),
     IndexOutOfBounds,
     UnknownIndex(Value<'a>),
     CannotIndexNonIndexable,
@@ -47,7 +56,7 @@ pub enum ErrorKind<'a> {
     CannotGetRef(Expression_),
     HeterogeneousTypesInArray,
     HeterogeneousTypesInMap,
-    UnknownStruct(std::vec::Vec<SpannedString>),
+    UnknownStruct(std::vec::Vec<String>),
     MissingStructField(String),
     CannotCountNonCountable,
     NoDefaultValue(Type),
@@ -56,9 +65,7 @@ pub enum ErrorKind<'a> {
 
 impl<'a> Display for Error<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let ErrorKind::IO(ref e) = self.kind {
-            e.fmt(f)
-        } else if let ErrorKind::Parser(ref e) = self.kind {
+        if let ErrorKind::Parser(ref e) = self.kind {
             e.fmt(f)
         } else {
             write!(f,
@@ -82,6 +89,9 @@ impl<'a> Display for Error<'a> {
                        ErrorKind::HeterogeneousTypesInMap |
                        ErrorKind::InvalidArgCount |
                        ErrorKind::CannotCountNonCountable => self.description().to_string(),
+                       ErrorKind::_UnresolvedPath(ref up) => {
+                           format!("unresolved path in ast {:?}", up)
+                       }
                        ErrorKind::CannotIterateOver(ref v) => {
                            format!("cannot iterate over {:?}", v)
                        }
@@ -118,7 +128,7 @@ impl<'a> Display for Error<'a> {
 impl<'a> BaseError for Error<'a> {
     fn description(&self) -> &str {
         match self.kind {
-            ErrorKind::IO(ref e) => e.description(),
+            ErrorKind::_UnresolvedPath(_) => "unresolved path in ast",
             ErrorKind::Parser(ref e) => e.description(),
             ErrorKind::CannotInferTypeEmptyArray => "cannot infer type for empty array",
             ErrorKind::CannotInferTypeEmptyMap => "cannot infer type for empty map",
@@ -171,14 +181,13 @@ pub type Result<'a, T> = std::result::Result<T, Error<'a>>;
 
 pub struct Interpreter<'a> {
     ast: &'a Ast,
-    funcs: std::collections::HashMap<Path, Value<'a>>,
-    structs: std::collections::HashMap<Path, StructDeclData>,
+    funcs: std::collections::HashMap<ResolvedPath, Value<'a>>,
+    structs: std::collections::HashMap<ResolvedPath, StructDeclData>,
 }
 
 #[derive(Debug)]
 pub struct InterpreterContext<'a> {
     vars: std::collections::HashMap<String, Variable<'a>>,
-    current_path: Path,
 }
 
 #[derive(Debug)]
@@ -200,7 +209,7 @@ pub enum Value<'a> {
     Map(Type, Type, MapValue<'a>),
     Reference(*const Value<'a>),
     MutReference(*mut Value<'a>),
-    Func(Path, FuncDeclData),
+    Func(FuncDeclData),
 }
 
 
@@ -249,20 +258,16 @@ impl<'a> Interpreter<'a> {
 
     fn inject_builtin_funcs(&mut self) {
         let mut inject_func = |name: String| {
-            self.funcs.insert(Path {
+            self.funcs.insert(ResolvedPath {
                                   span: Span::nil_span(),
-                                  parts: vec![SpannedString {
-                                                  span: Span::nil_span(),
-                                                  ident: name.clone(),
-                                              }],
+                                  parts: vec![name.clone()],
                               },
-                              Value::Func(Path {
+                              Value::Func(FuncDeclData {
                                               span: Span::nil_span(),
-                                              parts: vec![],
-                                          },
-                                          FuncDeclData {
-                                              span: Span::nil_span(),
-                                              name: name,
+                                              name: Path::Resolved(ResolvedPath {
+                                                  span:Span::nil_span(),
+                                                  parts: vec![name.clone()],
+                                              }),
                                               return_type: Type::None,
                                               parameters: vec![],
                                               statements: vec![],
@@ -276,18 +281,13 @@ impl<'a> Interpreter<'a> {
     pub fn execute(&'a mut self) -> Result<()> {
         self.inject_builtin_funcs();
 
-        let initial_path = Path {
-            span: Span::nil_span(),
-            parts: vec![],
-        };
-
         // We are forced to use unsafe instead of a standard try!() because the borrow checker has a bug:
         // When a loop contains a return, the borrow checker does not recognize it as an early lifetime end, and therefore imposes
         // additional constraints which make the code unwritable safely.
         //
         for statement in &self.ast.statements {
             unsafe {
-                try!((*(self as *mut Self)).execute_statement(statement, initial_path.clone()))
+                try!((*(self as *mut Self)).execute_statement(statement))
             }
         }
 
@@ -295,23 +295,16 @@ impl<'a> Interpreter<'a> {
             span: Span::nil_span(),
             expr: Expression_::FuncCall(Box::new(Expression {
                                             span: Span::nil_span(),
-                                            expr: Expression_::Variable(Path {
+                                            expr: Expression_::Variable(Path::Resolved(ResolvedPath {
                                                 span: Span::nil_span(),
-                                                parts: vec![SpannedString {
-                                                                span: Span::nil_span(),
-                                                                ident: "main".to_string(),
-                                                            }],
-                                            }),
+                                                parts: vec!["main".to_string()],
+                                            })),
                                         }),
                                         vec![]),
         };
 
         let mut context = InterpreterContext {
             vars: std::collections::HashMap::new(),
-            current_path: Path {
-                span: Span::nil_span(),
-                parts: vec![],
-            },
         };
 
         try!(self.value_from_expression(&mut context, &main_func_call_expr));
@@ -319,42 +312,38 @@ impl<'a> Interpreter<'a> {
         Ok(())
     }
 
-    fn execute_statement(&mut self, statement: &Statement, current_path: Path) -> Result<()> {
+    fn execute_statement(&mut self, statement: &Statement) -> Result<()> {
         match *statement {
-            Statement::FuncDecl(ref fd) => {
-                let mut new_path = current_path.clone();
-                new_path.parts.push(SpannedString {
-                    span: fd.span.clone(),
-                    ident: fd.name.clone(),
-                });
-
-                self.funcs.insert(new_path, Value::Func(current_path.clone(), *fd.clone()));
-            }
-            Statement::Import(ref i) => {
-                if !current_path.parts.is_empty() {
-                    let mut import_path = current_path.parts.clone();
-                    import_path.pop();
-                    try!(self.execute_import(i,
-                                             Path {
-                                                 span: current_path.span.clone(),
-                                                 parts: import_path,
-                                             }));
-                } else {
-                    try!(self.execute_import(i, current_path));
+            Statement::FuncDecl(ref rfd) => {
+                match rfd.name {
+                    Path::Resolved(ref rp) => {
+                        self.funcs.insert(rp.clone(), Value::Func(*rfd.clone()));
+                        Ok(())
+                    },
+                    Path::Unresolved(ref up) => {
+                        Err(Error {
+                            kind: ErrorKind::_UnresolvedPath(up.clone()),
+                            span: up.span.clone(),
+                        })
+                    }
                 }
-            }
-            Statement::StructDecl(ref sd) => {
-                let mut new_path = current_path.clone();
-                new_path.parts.push(SpannedString {
-                    span: sd.span.clone(),
-                    ident: sd.name.clone(),
-                });
-                self.structs.insert(new_path, *sd.clone());
-            }
-            _ => (),
-        };
-
-        Ok(())
+            },
+            Statement::StructDecl(ref rsd) => {
+                match rsd.name {
+                    Path::Resolved(ref rp) => {
+                        self.structs.insert(rp.clone(), *rsd.clone());
+                        Ok(())
+                    },
+                    Path::Unresolved(ref up) => {
+                        Err(Error {
+                            kind: ErrorKind::_UnresolvedPath(up.clone()),
+                            span: up.span.clone(),
+                        })
+                    }
+                }
+            },
+            _ => Ok(()),
+        }
     }
 
     fn type_from_value(value: *const Value, span: Span) -> Result<Type> {
@@ -382,7 +371,7 @@ impl<'a> Interpreter<'a> {
                 Value::MutReference(ref r) => {
                     Ok(Type::MutReference(Box::new(try!(Self::type_from_value(*r, span)))))
                 }
-                Value::Func(_, ref fd) => {
+                Value::Func(ref fd) => {
                     let mut param_types: std::vec::Vec<Box<Type>> = vec![];
                     for parameter in &fd.parameters {
                         param_types.push(Box::new(parameter.param_type.clone()));
@@ -407,52 +396,6 @@ impl<'a> Interpreter<'a> {
                 Value::Nil => Ok(Type::None),
             }
         }
-    }
-
-    fn execute_import(&mut self, import_data: &ImportData, current_path: Path) -> Result<()> {
-        // TODO: rework that for more safety and non-naive handling
-        let path_string = current_path.parts.iter().fold("".to_string(), |mut acc, ref item| {
-            acc.push_str(item.ident.as_ref());
-            acc.push_str("/");
-            acc
-        }) + import_data.path.as_ref() + ".ion";
-        let path = std::path::Path::new(AsRef::<str>::as_ref(&path_string[..]));
-        let mut file = match File::open(&path) {
-            Ok(file) => file,
-            Err(err) => {
-                return Err(Error {
-                    kind: ErrorKind::IO(err),
-                    span: Span::nil_span(),
-                })
-            }
-        };
-
-        let mut s = String::new();
-        let res = file.read_to_string(&mut s);
-        if let Some(err) = res.err() {
-            return Err(Error {
-                kind: ErrorKind::IO(err),
-                span: Span::nil_span(),
-            });
-        }
-        let mut reader = lexer::Reader::new(s.as_ref(), path_string.clone());
-
-        let mut parser = parser::Parser::new(&mut reader);
-        let ast = try!(parser.parse());
-
-        let mut new_path = current_path.clone();
-        for path_part in import_data.path.split('/') {
-            new_path.parts.push(SpannedString {
-                span: import_data.span.clone(),
-                ident: path_part.to_string(),
-            });
-        }
-
-        for statement in &ast.statements {
-            unsafe { try!((*(self as *mut Self)).execute_statement(statement, new_path.clone())) }
-        }
-
-        Ok(())
     }
 
     fn execute_block_statement(&'a self,
@@ -582,7 +525,7 @@ impl<'a> Interpreter<'a> {
         // TODO: detect ref to local in return expr
         match return_data.expected_type {
             Type::None => {
-                if let Some(_) = return_data.value {
+                if return_data.value.is_some() {
                     return Err(Error {
                         kind: ErrorKind::UnexpectedExprReturn,
                         span: return_data.span.clone(),
@@ -625,22 +568,24 @@ impl<'a> Interpreter<'a> {
                          args: &[Box<Expression>],
                          span: Span)
                          -> Result<Value> {
-        fn is_builtin_func(func: &Expression, name: &str) -> bool {
+        fn is_builtin_func<'a>(func: &Expression, name: &str) -> Result<'a, bool> {
             match func.expr {
                 Expression_::Variable(ref p) => {
-                    if p.parts.len() == 1 {
-                        p.parts.get(0).unwrap().ident == name
+                    let rp = try!(p.clone().resolved());
+
+                    if rp.parts.len() == 1 {
+                        Ok(rp.parts[0] == name)
                     } else {
-                        false
+                        Ok(false)
                     }
                 }
-                _ => false,
+                _ => Ok(false),
             }
         }
 
-        if is_builtin_func(func, "print") {
+        if try!(is_builtin_func(func, "print")) {
             self.builtin_print(context, args, span)
-        } else if is_builtin_func(func, "readln") {
+        } else if try!(is_builtin_func(func, "readln")) {
             self.builtin_readln(args, span)
         } else {
             self.execute_func_call_user(context, func, args, span)
@@ -653,11 +598,10 @@ impl<'a> Interpreter<'a> {
                               args: &[Box<Expression>],
                               span: Span)
                               -> Result<Value> {
-        let (path, func_decl) = try!(self.execute_func_call_resolve(context, func));
+        let func_decl = try!(self.execute_func_call_resolve(context, func));
 
         let mut local_context = InterpreterContext {
             vars: std::collections::HashMap::new(),
-            current_path: path,
         };
 
         try!(self.execute_func_call_initialize(func_decl,
@@ -673,10 +617,10 @@ impl<'a> Interpreter<'a> {
     fn execute_func_call_resolve(&'a self,
                                  context: *mut InterpreterContext<'a>,
                                  func: &Expression)
-                                 -> Result<(Path, &FuncDeclData)> {
+                                 -> Result<&FuncDeclData> {
         unsafe {
             match *try!(self.value_p_from_expression(context, &func)) {
-                Value::Func(ref p, ref fd) => Ok(((*p).clone(), fd)),
+                Value::Func(ref fd) => Ok(fd),
                 _ => {
                     Err(Error {
                         kind: ErrorKind::CannotCallNonFunction,
@@ -706,7 +650,7 @@ impl<'a> Interpreter<'a> {
         for (param_id, param) in func_decl.parameters.iter().enumerate() {
             let expression = {
                 if param_id < args.len() {
-                    let ret = &args.get(param_id).unwrap(); //FIXME: change to be reverted here: simply returning the rhs (see 34735)
+                    let ret = &args[param_id]; //FIXME: change to be reverted here: simply returning the rhs (see 34735)
                     ret
                 } else if let Some(ref e) = param.default_value {
                     e
@@ -887,45 +831,28 @@ impl<'a> Interpreter<'a> {
                                             p: Path,
                                             context: *mut InterpreterContext<'a>)
                                             -> Result<*mut Value> {
-        if p.parts.len() == 1 {
+        let rp = try!(p.resolved());
+
+        if rp.parts.len() == 1 {
             unsafe {
                 if let Some(ref mut var) = (*context)
                     .vars
-                    .get_mut(AsRef::<str>::as_ref(&p.parts.get(0).unwrap().ident[..])) {
+                    .get_mut(AsRef::<str>::as_ref(&rp.parts[0][..])) {
                     return Ok(&mut var.value);
                 }
             }
         };
 
-        unsafe {
-            if p.parts.len() == 1 &&
-               self.funcs.get(&Path::concat((*context).current_path.clone(), p.clone())).is_some() {
-                return Err(Error {
-                    kind: ErrorKind::CannotMutablyRefFunction,
-                    span: p.span.clone(),
-                });
-            }
-
-            let mut root_path = (*context).current_path.parts.clone();
-            root_path.pop();
-
-            if self.funcs
-                .get(&Path::concat(Path {
-                                       span: (*context).current_path.span.clone(),
-                                       parts: root_path,
-                                   },
-                                   p.clone()))
-                .is_some() {
-                return Err(Error {
-                    kind: ErrorKind::CannotMutablyRefFunction,
-                    span: p.span.clone(),
-                });
-            };
+        if self.funcs.get(&rp).is_some() {
+            return Err(Error {
+                kind: ErrorKind::CannotMutablyRefFunction,
+                span: rp.span.clone(),
+            });
         }
 
         Err(Error {
-            kind: ErrorKind::UnknownVariable(p.parts.clone()),
-            span: p.span.clone(),
+            kind: ErrorKind::UnknownVariable(rp.parts.clone()),
+            span: rp.span.clone(),
         })
     }
 
@@ -1004,7 +931,7 @@ impl<'a> Interpreter<'a> {
                             );
 
                             let last_index = a.len() - 1;
-                            Ok(a.get_mut(last_index).unwrap())
+                            Ok(&mut a[last_index])
                         }
                         _ => {
                             Err(Error {
@@ -1121,42 +1048,26 @@ impl<'a> Interpreter<'a> {
                                         p: Path,
                                         context: *mut InterpreterContext<'a>)
                                         -> Result<*const Value> {
-        if p.parts.len() == 1 {
+        let rp = try!(p.resolved());
+
+        if rp.parts.len() == 1 {
             unsafe {
-                if let Some(ref var) = (*context)
+                if let Some(var) = (*context)
                     .vars
-                    .get(AsRef::<str>::as_ref(&p.parts.get(0).unwrap().ident[..])) {
+                    .get(AsRef::<str>::as_ref(&rp.parts[0][..])) {
                     return Ok(&var.value);
                 }
             }
         };
 
-        unsafe {
-            if p.parts.len() == 1 {
-                if let Some(f) = self.funcs
-                    .get(&Path::concat((*context).current_path.clone(), p.clone())) {
-                    return Ok(f);
-                };
-            } else {
-                let mut root_path = (*context).current_path.parts.clone();
-                root_path.pop();
-
-                if let Some(f) = self.funcs.get(&Path::concat(Path {
-                                                                  span: (*context)
-                                                                      .current_path
-                                                                      .span
-                                                                      .clone(),
-                                                                  parts: root_path,
-                                                              },
-                                                              p.clone())) {
-                    return Ok(f);
-                };
-            }
-        }
+        if let Some(f) = self.funcs
+            .get(&rp) {
+            return Ok(f);
+        };
 
         Err(Error {
-            kind: ErrorKind::UnknownVariable(p.parts.clone()),
-            span: p.span.clone(),
+            kind: ErrorKind::UnknownVariable(rp.parts.clone()),
+            span: rp.span.clone(),
         })
     }
 
@@ -1235,7 +1146,7 @@ impl<'a> Interpreter<'a> {
                             );
 
                             let last_index = a.len() - 1;
-                            Ok(a.get(last_index).unwrap())
+                            Ok(&a[last_index])
                         }
                         _ => {
                             Err(Error {
@@ -1407,12 +1318,14 @@ impl<'a> Interpreter<'a> {
                                         span: Span,
                                         context: *mut InterpreterContext<'a>)
                                         -> Result<Value> {
-        let struct_decl = match self.structs.get(&path) {
+        let rp = try!(path.resolved());
+
+        let struct_decl = match self.structs.get(&rp) {
             Some(s) => s,
             None => {
                 return Err(Error {
-                    kind: ErrorKind::UnknownStruct(path.parts.clone()),
-                    span: path.span.clone(),
+                    kind: ErrorKind::UnknownStruct(rp.parts.clone()),
+                    span: rp.span.clone(),
                 })
             }
         };
@@ -1466,7 +1379,7 @@ impl<'a> Interpreter<'a> {
             }
         }
 
-        Ok(Value::Struct(path.clone(), StructValue { map: new_content }))
+        Ok(Value::Struct(Path::Resolved(rp), StructValue { map: new_content }))
     }
 
     fn value_from_expression_field(&'a self,
@@ -1571,7 +1484,7 @@ impl<'a> Interpreter<'a> {
                             );
 
                             let last_index = a.len() - 1;
-                            Ok(a.get(last_index).unwrap().clone())
+                            Ok(a[last_index].clone())
                         }
                         _ => {
                             Err(Error {
@@ -1644,6 +1557,11 @@ impl<'a> Interpreter<'a> {
             |e: &Expression| -> Result<'a, String> {
                 match try!(self.value_from_expression(context, e)) {
                     Value::String(s) => Ok(s),
+                    Value::Char(c) => {
+                        let mut s = String::new();
+                        s.push(c);
+                        Ok(s)
+                    },
                     other => Err(Error { kind: ErrorKind::MismatchedTypes(Type::String, try!(Self::type_from_value(&other, e.span.clone()))), span: e.span.clone()}),
                 }
             };
@@ -1750,11 +1668,13 @@ impl<'a> Interpreter<'a> {
                 Ok(Value::Map(*t1, *t2, MapValue { map: std::collections::HashMap::new() }))
             }
             Type::Struct(ref p) => {
-                let struct_decl = match self.structs.get(p) {
+                let rp = try!(p.clone().resolved());
+
+                let struct_decl = match self.structs.get(&rp) {
                     Some(s) => s,
                     None => {
                         return Err(Error {
-                            kind: ErrorKind::UnknownStruct(p.parts.clone()),
+                            kind: ErrorKind::UnknownStruct(rp.parts.clone()),
                             span: span,
                         })
                     }

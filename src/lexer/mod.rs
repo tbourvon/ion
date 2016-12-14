@@ -294,7 +294,7 @@ impl<'a> Reader<'a> {
         }
 
         if float {
-            if let Some(f) = number.parse::<f64>().ok() {
+            if let Ok(f) = number.parse::<f64>() {
                 Ok(Token::FloatLiteral(f))
             } else {
                 Err(Error {
@@ -302,7 +302,7 @@ impl<'a> Reader<'a> {
                     span: self.get_current_span(),
                 })
             }
-        } else if let Some(i) = number.parse::<i64>().ok() {
+        } else if let Ok(i) = number.parse::<i64>() {
             Ok(Token::IntegerLiteral(i))
         } else {
             Err(Error {

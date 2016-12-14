@@ -36,7 +36,7 @@ pub struct PackageData {
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct FuncDeclData {
     pub span: Span,
-    pub name: String,
+    pub name: Path,
     pub return_type: Type,
     pub parameters: std::vec::Vec<Box<FuncDeclParamData>>,
     pub statements: std::vec::Vec<BlockStatement>,
@@ -117,7 +117,7 @@ pub enum Type {
 #[derive(Debug, Clone)]
 pub struct StructDeclData {
     pub span: Span,
-    pub name: String,
+    pub name: Path,
     pub fields: std::vec::Vec<Box<StructFieldData>>,
 }
 
@@ -202,36 +202,78 @@ pub struct StructInitFieldData {
     pub value: Box<Expression>,
 }
 
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+pub enum Path {
+    Unresolved(UnresolvedPath),
+    Resolved(ResolvedPath)
+}
+
 #[derive(Debug, Clone)]
-pub struct Path {
+pub struct UnresolvedPath {
     pub span: Span,
     pub parts: std::vec::Vec<SpannedString>,
 }
 
-impl Path {
-    pub fn concat(path1: Path, path2: Path) -> Path {
+#[derive(Debug, Clone)]
+pub struct ResolvedPath {
+    pub span: Span,
+    pub parts: std::vec::Vec<String>,
+}
+
+/*impl UnresolvedPath {
+    pub fn concat(path1: UnresolvedPath, path2: UnresolvedPath) -> UnresolvedPath {
         let mut new_parts = path1.parts.clone();
 
         for ss in path2.parts {
             new_parts.push(ss);
         }
 
-        Path {
-            span: Span::concat(path1.span, path2.span),
+        UnresolvedPath {
+            span: Span::concat(path1.span.clone(), path2.span.clone()),
             parts: new_parts,
         }
     }
 }
 
-impl PartialEq for Path {
+impl ResolvedPath {
+    pub fn concat(path1: ResolvedPath, path2: ResolvedPath) -> ResolvedPath {
+        let mut new_parts = path1.parts.clone();
+
+        for ss in path2.parts {
+            new_parts.push(ss);
+        }
+
+        ResolvedPath {
+            span: Span::concat(path1.span.clone(), path2.span.clone()),
+            parts: new_parts,
+        }
+    }
+}*/
+
+impl PartialEq for UnresolvedPath {
     fn eq(&self, other: &Self) -> bool {
         self.parts == other.parts
     }
 }
 
-impl Eq for Path {}
+impl PartialEq for ResolvedPath {
+    fn eq(&self, other: &Self) -> bool {
+        self.parts == other.parts
+    }
+}
 
-impl Hash for Path {
+impl Eq for UnresolvedPath {}
+impl Eq for ResolvedPath {}
+
+impl Hash for UnresolvedPath {
+    fn hash<H>(&self, state: &mut H)
+        where H: Hasher
+    {
+        self.parts.hash(state)
+    }
+}
+
+impl Hash for ResolvedPath {
     fn hash<H>(&self, state: &mut H)
         where H: Hasher
     {

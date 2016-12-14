@@ -32,14 +32,26 @@ fn main() {
 
     let mut reader = lexer::Reader::new(s.as_ref(), args.get_str("<src>").to_string());
 
-    let mut parser = parser::Parser::new(&mut reader);
+    let parser = parser::Parser::new(&mut reader);
     let ast_res = parser.parse();
     if let Some(err) = ast_res.clone().err() {
         println!("{}", err)
     }
-    let ast = ast_res.ok().unwrap();
+    let mut ast = ast_res.ok().unwrap();
 
-    let mut interpreter = interpreter::Interpreter::new(ast);
+    {
+        let mut importer = parser::importer::Importer::new(&mut ast);
+        importer.import().unwrap();
+    }
+
+    {
+        let mut path_resolver = parser::path_resolver::PathResolver::new(&mut ast);
+        path_resolver.resolve().unwrap();
+    }
+
+    //println!("{:#?}", ast);
+
+    let mut interpreter = interpreter::Interpreter::new(&ast);
     let res2 = interpreter.execute();
     if let Some(err) = res2.err() {
         println!("{}", err)

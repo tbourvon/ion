@@ -1,4 +1,6 @@
 pub mod ast;
+pub mod importer;
+pub mod path_resolver;
 
 use std;
 use lexer::SToken;
@@ -86,14 +88,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<&Ast> {
+    pub fn parse(mut self) -> Result<Box<Ast>> { //TODO: careful with the move, to be monitored
         try!(self.next_token());
         while self.current_token.tok != Token::EOF {
             let statement = try!(self.parse_statement());
             self.ast.statements.push(statement);
         }
 
-        Ok(&self.ast)
+        Ok(self.ast)
     }
 
     fn binop_for_token(stoken: SToken) -> Option<BinaryOp> {
@@ -243,7 +245,13 @@ impl<'a> Parser<'a> {
 
         Ok(Box::new(FuncDeclData {
             span: Span::concat(start_sp, self.last_sp.clone()),
-            name: name,
+            name: Path::Unresolved(UnresolvedPath { 
+                span: name_token.sp.clone(),
+                parts: vec![SpannedString { 
+                    span: name_token.sp,
+                    ident: name,
+                }],
+            }),
             return_type: return_type,
             parameters: params,
             statements: statements,
@@ -297,7 +305,13 @@ impl<'a> Parser<'a> {
 
         Ok(Box::new(StructDeclData {
             span: Span::concat(start_sp, self.last_sp.clone()),
-            name: name,
+            name: Path::Unresolved(UnresolvedPath { 
+                span: name_token.sp.clone(),
+                parts: vec![SpannedString { 
+                    span: name_token.sp,
+                    ident: name,
+                }],
+            }),
             fields: fields,
         }))
     }
@@ -448,7 +462,7 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    fn parse_path(&mut self, first_part: Option<SToken>) -> Result<Path> {
+    fn parse_path(&mut self, first_part: Option<SToken>) -> Result<UnresolvedPath> {
         let mut parts: std::vec::Vec<SpannedString> = vec![];
 
         let ident_token = match first_part {
@@ -489,7 +503,7 @@ impl<'a> Parser<'a> {
             });
         }
 
-        Ok(Path {
+        Ok(UnresolvedPath {
             parts: parts,
             span: Span::concat(ident_token.sp, self.last_sp.clone()),
         })
@@ -604,7 +618,7 @@ impl<'a> Parser<'a> {
 
         Ok(Expression {
             span: Span::concat(start_sp, self.last_sp.clone()),
-            expr: Expression_::StructInit(path, fields),
+            expr: Expression_::StructInit(Path::Unresolved(path), fields),
         })
 
     }
@@ -699,7 +713,7 @@ impl<'a> Parser<'a> {
 
         Ok(Expression {
             span: path.span.clone(),
-            expr: Expression_::Variable(path),
+            expr: Expression_::Variable(Path::Unresolved(path)),
         })
     }
 
@@ -799,11 +813,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type(&mut self) -> Result<Type> {
-        fn get_builtin_type(path: &Path) -> Option<Type> {
-            if path.parts.len() != 1 {
+        fn get_builtin_type(up: &UnresolvedPath) -> Option<Type> {
+            if up.parts.len() != 1 {
                 None
             } else {
-                match path.parts.get(0).unwrap().ident.as_ref() {
+                match up.parts[0].ident.as_ref() {
                     "int" => Some(Type::Int),
                     "bool" => Some(Type::Bool),
                     "char" => Some(Type::Char),
@@ -837,7 +851,7 @@ impl<'a> Parser<'a> {
 
         match get_builtin_type(&path) {
             Some(t) => Ok(t),
-            None => Ok(Type::Struct(path)),
+            None => Ok(Type::Struct(Path::Unresolved(path))),
         }
     }
 
