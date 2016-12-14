@@ -5,4 +5,4 @@ authors = ["Tristan Bourvon <tristanbourvon+ion@gmail.com>"]
 
 [dependencies]
 docopt = "*"
-clippy = "*"
+#clippy = "*"
